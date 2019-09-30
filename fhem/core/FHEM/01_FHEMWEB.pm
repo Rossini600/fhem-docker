@@ -1,5 +1,5 @@
 ##############################################
-# $Id: 01_FHEMWEB.pm 19878 2019-07-21 10:26:47Z rudolfkoenig $
+# $Id: 01_FHEMWEB.pm 20273 2019-09-29 08:41:37Z rudolfkoenig $
 package main;
 
 use strict;
@@ -70,7 +70,7 @@ use vars qw($FW_sp);      # stylesheetPrefix
 # global variables, also used by 97_GROUP/95_VIEW/95_FLOORPLAN
 use vars qw(%FW_types);   # device types,
 use vars qw($FW_RET);     # Returned data (html)
-use vars qw($FW_RETTYPE); # image/png or the like
+use vars qw($FW_RETTYPE); # image/png or the like. Note: also as my below!
 use vars qw($FW_wname);   # Web instance
 use vars qw($FW_subdir);  # Sub-path in URL, used by FLOORPLAN/weblink
 use vars qw(%FW_pos);     # scroll position
@@ -89,6 +89,7 @@ use vars qw(%FW_visibleDeviceHash);
 use vars qw(@FW_httpheader); # HTTP header, line by line
 use vars qw(%FW_httpheader); # HTTP header, as hash
 use vars qw($FW_userAgent); # user agent string
+use vars qw($FW_addJs);     # Only for helper like AttrTemplate
 
 $FW_formmethod = "post";
 
@@ -106,7 +107,7 @@ my %FW_id2inform;
 my $FW_data;       # Filecontent from browser when editing a file
 my %FW_icons;      # List of icons
 my @FW_iconDirs;   # Directory search order for icons
-my $FW_RETTYPE;    # image/png or the like
+my $FW_RETTYPE;    # image/png or the like: Note: also as use vars above!
 my %FW_rooms;      # hash of all rooms
 my %FW_extraRooms; # hash of extra rooms
 my @FW_roomsArr;   # ordered list of rooms
@@ -319,6 +320,7 @@ FW_Undef($$)
     %FW_visibleDeviceHash = FW_visibleDevices();
     delete($logInform{$hash->{NAME}});
   }
+  delete $FW_svgData{$hash->{NAME}};
   return $ret;
 }
 
@@ -623,6 +625,7 @@ FW_finishRead($$$)
     FW_closeConn($hash);
     TcpServer_Close($hash, 1);
   } 
+  $FW_RET="";
 }
 
 sub
@@ -1062,6 +1065,7 @@ FW_answerCall($)
     my $n = $_; $n =~ s+.*/++; $n =~ s/.js$//; $n =~ s/fhem_//; $n .= "Param";
     FW_pO sprintf($jsTemplate, AttrVal($FW_wname, $n, ""), "$FW_ME/$_");
   } @jsList;
+  FW_pO $FW_addJs if($FW_addJs);
 
   ########################
   # FW Extensions
@@ -1154,7 +1158,7 @@ FW_dataAttr()
     my ($p, $default) = @_;
     my $val = AttrVal($FW_wname,$p, $default);
     $val =~ s/&/&amp;/g;
-    $val =~ s/'/&quot;/g;
+    $val =~ s/'/&#39;/g;
     return "data-$p='$val' ";
   }
 
@@ -1252,7 +1256,7 @@ FW_updateHashes()
   %FW_types = ();  # Needed for type sorting
 
   my $hre = AttrVal($FW_wname, "hiddenroomRegexp", "");
-  foreach my $d (keys %defs ) {
+  foreach my $d (devspec2array(".*", $FW_chash)) {
     next if(IsIgnored($d));
 
     foreach my $r (split(",", AttrVal($d, "room", "Unsorted"))) {
@@ -1996,6 +2000,7 @@ FW_showRoom()
   my ($idx,$svgIdx) = (1,1);
   @atEnds =  sort { $sortIndex{$a} cmp $sortIndex{$b} } @atEnds;
   $FW_svgData{$FW_cname} = { FW_RET=>$FW_RET, RES=>\%res, ATENDS=>\@atEnds };
+  my $svgDataUsed = 1;
   foreach my $d (@atEnds) {
     no strict "refs";
     my $fn = $modules{$defs{$d}{TYPE}}{FW_summaryFn};
@@ -2007,11 +2012,13 @@ FW_showRoom()
         return "$FW_cname,$d,".
                encode_base64(&{$fn}($FW_wname,$d,$FW_room,\%extPage),'');
       }, undef, "FW_svgCollect");
+      $svgDataUsed++;
     } else {
       $res{$d} = &{$fn}($FW_wname,$d,$FW_room,\%extPage);
     }
     use strict "refs";
   }
+  delete($FW_svgData{$FW_cname}) if(!$svgDataUsed);
   return FW_svgDone(\%res, \@atEnds, undef);
 }
 
@@ -2037,7 +2044,7 @@ FW_svgCollect($)
   my $h = $FW_svgData{$cname};
   my ($res, $atEnds) = ($h->{RES}, $h->{ATENDS});
   $res->{$d} = decode_base64($enc);
-  return if(int(keys %{$res}) != int(@{$atEnds}));
+  return if(!defined($atEnds) || int(keys %{$res}) != int(@{$atEnds}));
   $FW_RET = $h->{FW_RET};
   delete($FW_svgData{$cname});
   FW_svgDone($res, $atEnds, 1);
@@ -3191,7 +3198,7 @@ FW_devState($$@)
     $cmdList = "desiredTemperature" if(!$cmdList);
 
   } else {
-    my $html;
+    my $html = "";
     foreach my $state (split("\n", $state)) {
       $txt = $state;
       my ($icon, $isHtml);
@@ -3658,10 +3665,10 @@ FW_show($$)
         <ul>
         Space separated list of regexp:icon-name:cmd triples, icon-name and cmd
         may be empty.<br>
-        If the state of the device matches regexp, then icon-name will be
+        If the STATE of the device matches regexp, then icon-name will be
         displayed as the status icon in the room, and (if specified) clicking
-        on the icon executes cmd.  If fhem cannot find icon-name, then the
-        status text will be displayed. 
+        on the icon executes cmd.  If FHEM cannot find icon-name, then the
+        STATE text will be displayed. 
         Example:<br>
         <ul>
         attr lamp devStateIcon on:closed off:open<br>
@@ -4398,10 +4405,10 @@ FW_show($$)
         Leerzeichen getrennte Auflistung von regexp:icon-name:cmd
         Dreierp&auml;rchen, icon-name und cmd d&uuml;rfen leer sein.<br>
 
-        Wenn der Zustand des Ger&auml;tes mit der regexp &uuml;bereinstimmt,
+        Wenn STATE des Ger&auml;tes mit der regexp &uuml;bereinstimmt,
         wird als icon-name das entsprechende Status Icon angezeigt, und (falls
         definiert), l&ouml;st ein Klick auf das Icon das entsprechende cmd aus.
-        Wenn fhem icon-name nicht finden kann, wird der Status als Text
+        Wenn FHEM icon-name nicht finden kann, wird STATE als Text
         angezeigt. 
         Beispiel:<br>
         <ul>

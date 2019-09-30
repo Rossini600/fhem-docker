@@ -5,7 +5,7 @@
 #  FHEM module to communicate with Shelly switch/roller actor devices
 #  Prof. Dr. Peter A. Henning, 2018
 # 
-#  $Id: 36_Shelly.pm 19819 2019-07-12 06:54:38Z phenning $
+#  $Id: 36_Shelly.pm 19984 2019-08-11 15:16:11Z phenning $
 #
 ########################################################################################
 #
@@ -39,7 +39,7 @@ use vars qw{%attr %defs};
 sub Log($$);
 
 #-- globals on start
-my $version = "2.04";
+my $version = "2.06";
 
 #-- these we may get on request
 my %gets = (
@@ -585,7 +585,7 @@ sub Shelly_Set ($@) {
         $max = 20;
       }
       $time           = int(abs($targetpct-$pct)/100*$max);
-      $cmd            = "?go=to_pos&roller_pos=".$targetpct;
+      $cmd            = "?go=to_pos&roller_pos=" . ($pctnormal ? $targetpct : 100 - $targetpct);
       $hash->{MOVING} = $pctnormal ? (($targetpct > $pct) ? "moving_up" : "moving_down") : (($targetpct > $pct) ? "moving_down" : "moving_up");
 
       $hash->{DURATION}  = $time;
@@ -1395,7 +1395,7 @@ sub Shelly_updown2($){
            </ul>
            Attention: Of course, a csrfToken must be included as well - or a proper <i>allowed</i> device declared.</li>
          </ul>
-        <a name="Shellyset" id="Shellyset></a>
+        <a name="Shellyset" id="Shellyset"></a>
         <h4>Set</h4>  
         For all Shelly devices
         <ul>

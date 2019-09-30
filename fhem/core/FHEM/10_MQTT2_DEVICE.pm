@@ -1,5 +1,5 @@
 ##############################################
-# $Id: 10_MQTT2_DEVICE.pm 19709 2019-06-25 10:54:12Z rudolfkoenig $
+# $Id: 10_MQTT2_DEVICE.pm 20071 2019-08-27 09:43:28Z rudolfkoenig $
 package main;
 
 use strict;
@@ -391,7 +391,6 @@ MQTT2_DEVICE_Attr($$)
 
   if($attrName =~ m/(.*)List/) {
     my $atype = $1;
-
     if($type eq "del") {
       MQTT2_DEVICE_delReading($dev) if($atype eq "reading");
       return undef;
@@ -503,10 +502,10 @@ MQTT2_DEVICE_addReading($$)
   MQTT2_DEVICE_delReading($name);
   foreach my $line (split("\n", $param)) {
     my ($re,$code) = split(" ", $line,2);
+    return "Bad line >$line< for $name" if(!defined($re) || !defined($code));
     eval { "Hallo" =~ m/^$re$/ };
     return "Bad regexp: $@" if($@);
-    $modules{MQTT2_DEVICE}{defptr}{re}{$re}{"$name,$code"} = $code
-        if($re && $code);
+    $modules{MQTT2_DEVICE}{defptr}{re}{$re}{"$name,$code"} = $code;
   }
   return undef;
 }

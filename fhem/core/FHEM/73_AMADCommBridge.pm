@@ -26,7 +26,7 @@
 #  GNU General Public License for more details.
 #
 #
-# $Id: 73_AMADCommBridge.pm 19673 2019-06-20 20:34:51Z CoolTux $
+# $Id: 73_AMADCommBridge.pm 20129 2019-09-08 08:08:31Z CoolTux $
 #
 ###############################################################################
 ##
@@ -1463,7 +1463,7 @@ sub ParseMsg($$) {
   "release_status": "stable",
   "license": "GPL_2",
   "version": "v4.4.3",
-  "x_flowsetversion": "4.4.1",
+  "x_flowsetversion": "4.4.2",
   "author": [
     "Marko Oldenburg <leongaultier@gmail.com>"
   ],

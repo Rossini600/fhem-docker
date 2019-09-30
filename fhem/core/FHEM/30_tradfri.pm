@@ -1,5 +1,5 @@
 
-# $Id: 30_tradfri.pm 19098 2019-04-02 16:38:49Z justme1968 $
+# $Id: 30_tradfri.pm 20171 2019-09-16 07:27:12Z justme1968 $
 
 package main;
 
@@ -238,11 +238,13 @@ tradfri_processEvent($$) {
         Log3 $name, 1, "$name: Autocreate: An error occurred while creating device for id '$id': $ret";
 
       } else {
-        CommandAttr(undef,"$cname alias ".$decoded->{name});
+        CommandAttr(undef,"$cname alias ".$decoded->{name}) if( $decoded->{name} );
         CommandAttr(undef,"$cname room Tradfri");
         #CommandAttr(undef,"$cname IODev $name");
 
         CommandAttr(undef, "$name createGroupReadings 1") if( $decoded->{r} eq 'group' );
+
+        CommandAttr(undef,"$cname subType blind") if( $decoded->{type} eq 'blind' );
 
         HUEDeviceSetIcon($cname);
         $defs{$cname}{helper}{fromAutocreate} = 1 ;

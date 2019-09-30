@@ -1,12 +1,124 @@
 # Add changes at the top of the list. Keep it in ASCII, and 80-char wide.
 # Do not insert empty lines here, update check depends on it.
- - feature: 93_Log2Syslog: V5.8.1, new attributes and further developments 
+- bugfix:   10_MYSENSORS_DEVICE: Prevent FHEM crash in case of ext. OTA update
+ - change:  70_BOTVAC: new state "Password missing",
+                       added check for robots in account
+ - bugfix:  95_Dashboard: fix warnings
+ - change:  88_Timer: spelling mistake
+ - bufix:   93_DbRep: fix readingRename without leading device Forum: #104024,
+                      some more fixes
+ - bugfix:  88_Timer: fix code #103848 + added check load file
+ - feature: 95_Dashboard: new attr "dashboard_homeTab", "dashboard_webRefresh",
+                          new set command activateTab, bugfixes, comref revised
+ - change:  49_SSCam: set compatibility to SVS version 8.2.6
+ - feature: 73_DoorBird: No Picture/video menue for stations without camera
+ - new:     70_CanOverEthernet: introducing new module
+ - change:  70_SolarEdgeAPI: source code formatting
+ - bugfix:  89_FULLY: Support Fully version 1.34
+ - change:  93_DbRep: comma can be shown in sqlCmdHistory, Forum: #103908
+ - feature: 49_SSCamSTRM: new attribute "hideAudio"
+ - bugfix:  73_AutoShuttersControl: change code in ShuttersCommandSet
+ - bugfix:  88_Timer: fix sort function
+ - feature: 70_SolarEdgeAPI: start using "overview" API, new attributes
+ - new:     88_Timer: new modul
+ - bugfix:  95_Dashboard: fix eliminating links to detail view
+ - change:  95_Dashboard: change attribute "noLinks" to "dashboard_noLinks"
+ - bugfix:  98_todoist: better API v8 fix
+ - feature: 95_Dashboard: new attribute "noLinks" - no links to devices detail
+ - feature: 49_SSCamSTRM: new attribute "noLink" - suppress link to detail view
+ - bugfix:  49_SSCam: fix warnings, Forum: 45671#msg975610
+-  change:  70_ZoneMinder: improved contents of state (thx Florian_GT)
+ - change:  95_Dashboard: attr dashboard_activetab is now working as designed,
+                          commandref revised, internal code review
+ - change:  73_AutoShuttersControl: change timelimit for restart initial
+                                    frequence
+ - change:  49_Arlo: support new Arlo API, video download fix
+ - change:  93_DbRep: release unnecessary allocated memory, fix warnings
+ - feature: 59_Weather: check newLocation value
+ - change:  49_SSCam: release unnecessary allocated memory
+ - new:     70_SolarEdgeAPI: new module
+ - bugfix:  74_AMADautomagicFlowset: fix openApp bug in SetCommand Flow
+ - feature: 59_Weather.pm: plus all API Files - Add new Modul setter newLocation
+ - feature: 49_SSCam(STRM): hide buttons in streaming device with new attribute
+                            hideFooter, minor code changes
+ - feature  73_AutoShuttersControl: add roommate value for ASC_Up/Down for
+                     Roommate only shutter drive
+ - feature: 70_KODI: Added fetching of channel names and command openchannel to
+                        open channel by names. Channel IDs will be converted
+                        automatically.
+ - feature: 93_DbRep: SQL Wildcard (%) usage possible as placeholder in a 
+                      reading- or device-list. Forum: #101756,
+                      internal code changes of SQL statement generation
+ - feature: 14_SD_BELL: added model Grothe_Mistral_SE_03 | Grothe_Mistral_SE_01
+                        fixed repeats Heidemann_|_Heidemann_HX_|_VTX-BELL
+ - bugfix: 14_SD_UT: fixed Manax MX-RCS250 | mumbi button ALL
+ - feature: 88_HMCCU: new rpc set command
+ - bugfix:  74_AMADautomagicFlowset: change Flowset Action TTS to use network
+                engine
+ - feature:     30_tradfri: blind support
+ - feature: 93_DbLog: add-on parameter "force" for MinInterval- Forum: #97148,
+                      new attribute traceHandles, show DB driver versions in 
+                      configCheck
+ - new:     98_readinsWatcher: new modul
+ - change:  72_TA_CMI_JSON: adding model attribute
+ - feature: 93_DbLog: attr global logdir is considered by set exportCache
+ - change:  76_SMAInverter: STP10.0-3AV-40 298 type included
+ - bugfix:  73_AutoShuttersControl: fix little bugs, change control logic
+ - feature: 93_DbRep: devices contained in the selection definition are marked
+                      as "Probably associated with" if possible
+ - bugfix:  76_SMAInverter: fix Perl warnings
+ - bugfix:  93_DbRep: fix add newline at the end of DbReadingsVal result, 
+                      Forum: #103295
+ - change:  76_SMAPortal: change switch consumer to on<->automatic only in 
+                          graphic overview
+ - change:  93_DbLog: configCheck changed: check if new DbLog version is 
+                      available or the local one is modified
+ - feature: 93_DbRep: new attribute fetchValueFn to change displayed values of
+                      database field VALUE got by fetchrows command
+ - feature: 93_DbLog: new attribute dbSchema to add database schema to tables
+                      Forum: #102679 
+ - feature: 76_SMAInverter: V2.13.0, attr target-serial/target-susyid are set 
+                            automatically if not defined, new inverter types
+                            added, support of Meta/Installer, ETOTAL is 
+                            calculated if inverter doesn't provide it 
+ - feature: 14_SD_UT: added new model OR28V & fixed RC_10
+ - feature: 70_ZoneMinder: added cause and notes to alerts. Credits to Obi
+ - bugfix:  73_NUKIBridge: fix "Can't use stringas a HASH ref while strict
+                           refs in use"
+ - change:  88_HMCCU: New features and bug fixes
+ - feature: 36_WMBUS: initial support for mode 7 encryption (mostly untested)
+            Digest::CMAC must be installed
+ - feature: 72_XiaomiDevice: added S1 vacuum states
+ - bugfix:  73_AutoShuttersControl: fix bug forum #966778
+ - change:  49_SSCam: commandref revised
+ - bugfix:  73_AutoShuttersControl: fix UTF8 Problem und Initialisierungfehler,
+               fix brightness morning and evening drive, add more condition
+               for roommate and shading
+ - bugfix:  82_LGTV_WebOS: fix Forum #966380
+ - feature: 93_DbLog: new attr DbLogValueFn propagated as device specific 
+                      attribute if DbLog is used
+ - bugfix:  70_ZoneMinder: json parsing - again
+ - bugfix:  89_FULLY: Support for Fully version 1.33
+ - feature: 22_HOMEMODE: v1.4.10 add support for PET
+ - change:  98_DOIFtools: remove unessesary code due to changes in console.js
+ - bugfix:  70_ZoneMinder: fixed JSON-parsing bug
+ - feature: 57_Calendar: get ...events include:... returnType:...
+ - feature: 44_TEK603: ser2net support
+ - feature: 73_AutoShuttersControl: add new Dev TYPE in %posSetCmds,
+                   remove old commandref text
+ - bugfix:  73_AutoShuttersControl: fix bug in getShuttersPosCmdValueNegate
+                    add new Attribut ASC_WindowRec_PosAfterDayClosed for
+                    Shutter Pos at day after closed window
+ - feature: 73_AutoShuttersControl: fix little commandref typo,
+                   expand ascAPIget Fn
+ - bugfix:  93_Log2Syslog: fix warning uninitialized value in numeric (>=)
+ - feature: 93_Log2Syslog: V5.8.1, new attributes and further developments
             regarding to Forum: topic,75426.msg958836.html#msg958836,
             use "get <device> versionNotes" for further informations
  - change:  77_UWZ: remove last InternalTimer Fn parameter
  - feature: 14_SD_WS.pm: crc calculation fixes and
-            new protocol for Atech wireless weather station 
-            added new sensor TECVANCE TV-4848 
+            new protocol for Atech wireless weather station
+            added new sensor TECVANCE TV-4848
  - change:  14_SD_RSL.pm: changed loglevel from 4 to 3 and improved readability
  - feature: 14_SD_WS07.pm: new sensor / station Auriol AFW 2 A1, IAN: 297514
  - feature: 90_SIGNALduino_un.pm: support tracing geiger rohrmotor signals
@@ -14,13 +126,13 @@
             Option to reconstruct last bit of transmission in MU and MS signals
             if there is enough data to detect it.
             Moved protocol hash into a separate perl module instead of loading
-            a simple textfile into a variable. 
+            a simple textfile into a variable.
             Added standard deviceOverview output in detail page #545
             new internal (Protocol_ID), which will provide the protocolID in
             logcial modules.
             Drop-down list for set command config CC1101 (#589)
             add drop-down list for cc1101_bWidth, cc1101_rAmpl and cc1101_sens
- - change:  49_SSCam: PTZ panel internal code changed 
+ - change:  49_SSCam: PTZ panel internal code changed
  - bugfix:  49_SSCam: fix warnings
  - feature: 49_SSCam: support of FTUI Widget with SSCamSTRM, new attributes
                       in SSCamSTRM, some fixes
@@ -32,11 +144,11 @@
  - feature: 71_YAMAHA_NP: New commands 'checkForNewFirmware' and 'friendlyName'
  - feature: 95_Astro: v2.1.0: add alternative global functions
                               to replace SUNRISE_EL
- - feature: 98_WeekdayTimer now supports holiday2we entries 
+ - feature: 98_WeekdayTimer now supports holiday2we entries
                weekEnd and noWeekEnd
  - bugfix:  71_YAMAHA_NP: fixed 'timerRepeat'
  - new:     76_SMAPortal: new module to integrate the SMA Sunny Portal
-                          (comes with 76_SMAPortalSPG graphic device and a 
+                          (comes with 76_SMAPortalSPG graphic device and a
                           widget for FTUI), special thanks to Wzut and Xguide !
  - bugfix:  95_Astro: v2.0.3: improved Windows POSIX compatibility for
                       timezone support
@@ -51,8 +163,8 @@
  - feature: 82_LGTV_WebOS: add wakeupCmd attribut to be executed when turning
                   on an absent device. Can be an FHEM command or Perl command
  - bugfix:  32_withings: handle duplicate pwv values
- - change:  49_SSCam: increase get SID timeout to at least 60 s to avoid 
-                      potential auth.cgi problem, set compatibility to SVS 
+ - change:  49_SSCam: increase get SID timeout to at least 60 s to avoid
+                      potential auth.cgi problem, set compatibility to SVS
                       version 8.2.4, improve disable/enable behavior
  - bugfix:  71_YAMAHA_NP: Fixed 'timerVolume'
  - new:     huedevice.template: New template for HUEDevice
@@ -102,7 +214,7 @@
                     addcmd lock_remote
                     change devstateicon/cmd
  - change:  55_PIFACE: now WiringPI V >= 2.46 supported
- - feature: 73_AutoShuttersControl: add new attribut 
+ - feature: 73_AutoShuttersControl: add new attribut
                ASC_Sgading_MinMax_Elevation, many bug fixes
  - bugfix:  88_HMCCU: Fixed noInitialUpdate bug
  - bugfix:  70_BOTVAC: set robotSounds filter
@@ -112,7 +224,7 @@
                        remove style element from cleaning statistics
  - bugfix:  73_AutoShuttersControl: fix litte bugs and change manual drive
                              detection
- - feature: 49_SSCam: In detailview are buttons provided to open the camera 
+ - feature: 49_SSCam: In detailview are buttons provided to open the camera
                       native setup screen or Synology Surveillance Station and
                       the Synology Surveillance Station online help
  - bugfix:  73_DoorBird: bugfix for timing between History-Image + event
@@ -137,7 +249,7 @@
  - change:  49_SSCam: attributes rec/snapemailtxt, rec/snaptelegramtxt may
                       contain ":", StmKey quoted depending on attribute
                       noQuotesForSID (Forum: #45671.msg938236.html#msg938236)
- - change:  77_SMAEM: set reset to delete and reinitialize cacheFile, 
+ - change:  77_SMAEM: set reset to delete and reinitialize cacheFile,
                       support of Installer.pm/Meta.pm added
  - change:  73_GardenaSmartBridge: change loglevel
  - change:  50_TelegramBot: allow \s, addtl silenCmds, fixes
@@ -161,7 +273,7 @@
              reads Client-Insights to update blocked reading
  - bugfix:  59_Weather: fix little bug then create weblink
  - bugfix:  88_HMCCU: Flag for disabling initial device update
- - bugfix:  10_MYSENSORS_DEVICE: prevent fhem crashing by ack timeout 
+ - bugfix:  10_MYSENSORS_DEVICE: prevent fhem crashing by ack timeout
              at higher verobse levels
  - change:  98_Heating_Control.pm will be removed soon. Users will need to
              change their device definitions to 98_WeekdayTimer; supporting
@@ -186,7 +298,7 @@
                       separate readings for heatrbeat, smartSleep & NACK
  - bugfix:  73_GardenaSmartBridge: fix undefined_value Error
  - feature: 98_Text2Speech: add Amazon Polly as new suggested TTS-Engine
-              due best quality 
+              due best quality
  - bugfix:  73_AutoShuttersControl: fix shading absent and coming home, fix
               Reading ASC_Time_PrivacyDriveDown, fix blocking shutter then
               shading drive and terrace door open
@@ -203,7 +315,7 @@
  - change:  50_MOBILEALERTSGW: Checksum check added
  - change:  93_DbRep: check index "Report_Idx" during first DB connect
  - change:  98_RandomTimer: remove 59_Twilight dependency
- - feature: 93_DbRep: new set "index" command to manage needed indexe for 
+ - feature: 93_DbRep: new set "index" command to manage needed indexe for
                       DbLog and DbRep, minor code changes
  - change:  98_WeekdayTimer: remove 59_Twilight dependency
  - feature: 73_AutoShuttersControl: new major release 0.6, add wind support,
@@ -227,9 +339,9 @@
                       !!! NOTE !!! attr shutdownWait will be deleted it set and
                       an appropriated log message appears.
  - bugfix:  70_BRAVIA: fix channel presets
- - bugfix:  49_SSCam: fix perl warnings, Forum: 45671.msg927912.html#msg927912 
+ - bugfix:  49_SSCam: fix perl warnings, Forum: 45671.msg927912.html#msg927912
  - new:     10_WS980: new module to control the WS980Wifi weather station
- - feature: 93_DbRep: the "explain" SQL-command is possible now in sqlCmd 
+ - feature: 93_DbRep: the "explain" SQL-command is possible now in sqlCmd
  - feature: 10_MYSENSORS_DEVICE: add attrTemplate support
  - change:  00_MYSENSORS: enhance support for node functions
                       when using multiple GW's
@@ -242,7 +354,7 @@
                Support
  - change:  73_AMADCommBridge: change to perl packages, add Meta and Installer
                Support
- - change:  49_SSCam: delay FHEM shutdown as long as sessions are not 
+ - change:  49_SSCam: delay FHEM shutdown as long as sessions are not
                       terminated, add Meta.pm support
  - feature: 30_HUEBridge: added schedules (by PPP01)
  - change:  74_GardenaSmartDevice: change on-for-timer time format
@@ -289,7 +401,7 @@
                       a optional given device, fix deldoublets in SQLite
  - bugfix:  49_SSCam: V8.11.3, fhem hang in loop while restart or get snapinfo
                       Forum: #45671.msg915546.html#msg915546
- - feature: mqtt2.template: A_00_MQTT2_CLIENT_general_bridge revised for better 
+ - feature: mqtt2.template: A_00_MQTT2_CLIENT_general_bridge revised for better
             compability with popular devices
  - bugfix:  49_SSCam: back to V8.11.0 due to some problems with 8.11.2
  - feature: 70_ENIGMA2: add remotecontrolChannel attribute to customize
@@ -307,7 +419,7 @@
  - changed: 93_DbLog: minor change of Log entry
  - changed: 70_Pushover: attribute 'storage' was renamed to 'storagePath'
                  and is now visible in FHEMWEB
- - changed: 98_weekprofile: use topic name from reading 'active_topic' 
+ - changed: 98_weekprofile: use topic name from reading 'active_topic'
                  if topic name isn't given
  - changed: 98_STOCKQUOTES: moved to contrib since not maintained and broken
                  due to termination of Yahoo Finance API
@@ -328,7 +440,7 @@
  - bugfix:  74_UnififSwitch: fixed poe restart
  - feature: 57_Calendar.pm: new features and attributes
                             german commandref added
- - bugfix:  00_SIGNALduino: Load protocolHash from web if file  is 
+ - bugfix:  00_SIGNALduino: Load protocolHash from web if file  is
                            missing on fs
  - bugfix:  49_SSCam: some warnings, Forum:#97706
  - bugfix:  88_HMCCU: Fixed minor bugs.
@@ -336,19 +448,19 @@
                  new webmenu "Display protocollist".
                  Serval new protocols added.
                  New Oregon V3 sensors suppored.
-                 Firmware for avr boards can be downloaded and flashed. 
+                 Firmware for avr boards can be downloaded and flashed.
                  on demand from gitghub releases.
                  supports dupTimeout on same iodev
     change:  00_SIGNALduino: Attribute hardware does not longer support nano
                             select nano328 instead
   - feature: 14_SD_RSL: Updated implementation for "all" button on devices
   - feature: 14_SD_WS: support sensors E0001PA,S522,TX-EZ6,other
-                      reading sendmode humidityTrend, temperatureTrend,       
+                      reading sendmode humidityTrend, temperatureTrend,
                       windspeed, batteryState added
                       attr max-deviation-temp and -hum added
   - changed: 14_SD_WS07: attr correction-xxx to offset-xxx renamed!
   - feature: 14_SD_WS07: new negation-batt attribute
-                         Temp only sensors supported 
+                         Temp only sensors supported
                          support for max deviation attribute
   - changed: 14_SD_WS09: reading batteryState added, commandref extended
   - changed: 14_Hideki: reading batteryState added
@@ -365,7 +477,7 @@
              equivalent
   - bugfix:  70_BOTVAC: solved recursion while looking up hostname of server
   - feature: limit reading/attr name length in featurelevel 6.0+ (Forum #97493)
-  - feature: 49_SSCam: send recordings by telegram is integrated as well as 
+  - feature: 49_SSCam: send recordings by telegram is integrated as well as
                        sending snapshots
   - bugfix:  74_XiaomiBTLESens: fix Undefined subroutine
                                 &XiaomiBTLESens::makeDeviceName Bug
@@ -375,8 +487,8 @@
   - changed. 98_WOL: remove dependency on Twilight + German COmmandref
   - bugfix:  98_WeekdayTimer: Label not found for "next E"
   - bugfix:  70_ONKYO_AVR: model Reading not written correctly
-  - feature: 93_DbRep: executeBeforeProc / executeAfterProc is now available 
-                       for sqlCmd,sumValue, maxValue, minValue, diffValue, 
+  - feature: 93_DbRep: executeBeforeProc / executeAfterProc is now available
+                       for sqlCmd,sumValue, maxValue, minValue, diffValue,
                        averageValue
   - changed: 98_WeekdayTimer: remove Twilight dependency
   - feature: 74_AMADautomagicflowset: add support for Android 9 Pie

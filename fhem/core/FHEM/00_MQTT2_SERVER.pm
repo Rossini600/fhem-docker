@@ -1,5 +1,5 @@
 ##############################################
-# $Id: 00_MQTT2_SERVER.pm 19753 2019-07-01 06:42:12Z rudolfkoenig $
+# $Id: 00_MQTT2_SERVER.pm 20131 2019-09-08 10:17:37Z rudolfkoenig $
 package main;
 
 # TODO: test SSL
@@ -82,7 +82,7 @@ MQTT2_SERVER_keepaliveChecker($)
 {
   my ($hash) = @_;
   my $now = gettimeofday();
-  my $multiplier = AttrVal($hash, "keepaliveFactor", 1.5);
+  my $multiplier = AttrVal($hash->{NAME}, "keepaliveFactor", 1.5);
   if($multiplier) {
     foreach my $clName (keys %{$hash->{clients}}) {
       my $cHash = $defs{$clName};
@@ -451,6 +451,7 @@ MQTT2_SERVER_sendto($$$$)
   $val = "" if(!defined($val));
   foreach my $s (keys %{$hash->{subscriptions}}) {
     my $re = $s;
+    $re =~ s,^#$,.*,g;
     $re =~ s,/?#,\\b.*,g;
     $re =~ s,\+,\\b[^/]+\\b,g;
     if($topic =~ m/^$re$/) {

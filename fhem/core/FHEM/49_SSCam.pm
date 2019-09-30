@@ -1,5 +1,5 @@
 ########################################################################################################################
-# $Id: 49_SSCam.pm 19846 2019-07-17 22:54:45Z DS_Starter $
+# $Id: 49_SSCam.pm 20248 2019-09-25 22:05:50Z DS_Starter $
 #########################################################################################################################
 #       49_SSCam.pm
 #
@@ -48,6 +48,13 @@ eval "use FHEM::Meta;1" or my $modMetaAbsent = 1;
 
 # Versions History intern
 our %SSCam_vNotesIntern = (
+  "8.19.1" => "26.09.2019  set compatibility to 8.2.6 ",
+  "8.19.0" => "21.09.2019  support attr \"hideAudio\" SSCamSTRM-device ",
+  "8.18.2" => "19.09.2019  sample streams changed in comref, support of attr noLink in Streaming-Device ",
+  "8.18.1" => "18.09.2019  fix warnings, Forum: https://forum.fhem.de/index.php/topic,45671.msg975610.html#msg975610 ",
+  "8.18.0" => "13.09.2019  change usage of own hashes to central %data hash, release unnecessary allocated memory ",
+  "8.17.0" => "12.09.2019  fix warnings, support hide buttons in streaming device, change handle delete SNAPHASHOLD ",
+  "8.16.3" => "13.08.2019  commandref revised ",
   "8.16.2" => "17.07.2019  change function SSCam_ptzpanel using css stylesheet ",
   "8.16.1" => "16.07.2019  fix warnings ",
   "8.16.0" => "14.07.2019  change detail link generation from SSCamSTRM to SSCam ",
@@ -160,6 +167,9 @@ our %SSCam_vNotesIntern = (
 
 # Versions History extern
 our %SSCam_vNotesExtern = (
+  "8.19.0" => "21.09.2019 A new attribute \"hideAudio\" in Streaming devices is supportet. Use this attribute to hide the ".
+                          "audio control panel in Streaming device. ",
+  "8.18.2" => "19.09.2019 SSCam supports the new attribute \"noLink\" in streaming devices ",
   "8.15.0" => "09.07.2019 support of integrating Streaming-Devices in a SSCam FTUI widget ",
   "8.14.0" => "01.06.2019 In detailview are buttons provided to open the camera native setup screen or Synology Surveillance Station and the Synology Surveillance Station online help. ",
   "8.12.0" => "25.03.2019 Delay FHEM shutdown as long as sessions are not terminated, but not longer than global attribute \"maxShutdownDelay\". ",
@@ -274,7 +284,7 @@ our %SSCam_vNotesExtern = (
 );
 
 # getestete SVS-Version
-my $compstat = "8.2.5";
+my $compstat = "8.2.6";
 
 # Aufbau Errorcode-Hashes (siehe Surveillance Station Web API)
 my %SSCam_errauthlist = (
@@ -541,8 +551,10 @@ return undef;
 ################################################################
 sub SSCam_Undef($$) {
   my ($hash, $arg) = @_;
+  my $name = $hash->{NAME};
   
   RemoveInternalTimer($hash);
+  delete $data{SSCam}{$name};
    
 return undef;
 }
@@ -1949,7 +1961,7 @@ sub SSCam_FWdetailFn ($$$$) {
       $ret .= $hash->{".setup"};
   }
   
-  $hash->{".ptzhtml"} = SSCam_ptzpanel($d) if($hash->{".ptzhtml"} eq "");
+  $hash->{".ptzhtml"} = SSCam_ptzpanel($d,$d) if($hash->{".ptzhtml"} eq "");
 
   if($hash->{".ptzhtml"} ne "" && AttrVal($d,"ptzPanel_use",1)) {
       $ret .= $hash->{".ptzhtml"};
@@ -5119,22 +5131,25 @@ sub SSCam_camop_parse ($) {
                 Log3($name, 3, "$name - Camera $camname exposure mode was set to \"$hash->{HELPER}{EXPMODE}\"");
             
 			} elsif ($OpMode eq "GetRec") {              
-
                 my $recid     = ReadingsVal("$name", "CamLastRecId", "");
                 my $createdTm = ReadingsVal("$name", "CamLastRecTime", "");
                 my $lrec      = ReadingsVal("$name", "CamLastRec", "");
                 my $fileName  = (split("/",$lrec))[1];
+                my $sn        = 0;
                 
-                my %sendrecs = ();                  # Recording Hash zum Versand wird leer erstellt
-                my $sn       = 0;
-                $sendrecs{$sn}{recid}        = $recid;
-                $sendrecs{$sn}{createdTm}    = $createdTm;
-				$sendrecs{$sn}{fileName}     = $fileName;
-				$sendrecs{$sn}{".imageData"} = $myjson;
+                $hash->{HELPER}{TRANSACTION} = "fake_recsend";          # fake Transaction Device setzen
+                my $tac = SSCam_openOrgetTrans($hash);                  # Transaktion vorhandenen Code (fake_recsend)              
+                
+                $data{SSCam}{$name}{SENDRECS}{$tac}{$sn}{$recid}       = $recid;
+                $data{SSCam}{$name}{SENDRECS}{$tac}{$sn}{createdTm}    = $createdTm;
+				$data{SSCam}{$name}{SENDRECS}{$tac}{$sn}{fileName}     = $fileName;
+				$data{SSCam}{$name}{SENDRECS}{$tac}{$sn}{".imageData"} = $myjson;
 				Log3($name,4, "$name - Recording '$sn' added to send recording hash: ID => $recid, File => $fileName, Created => $createdTm");
                 
                 # prüfen ob Recording als Email / Telegram versendet werden soll                
-				SSCam_prepareSendData ($hash, $OpMode, \%sendrecs);
+				SSCam_prepareSendData ($hash, $OpMode, $data{SSCam}{$name}{SENDRECS}{$tac});
+                
+                SSCam_closeTrans ($hash);                               # Transaktion beenden
                         
                 readingsBeginUpdate($hash);
                 readingsBulkUpdate($hash,"Errorcode","none");
@@ -5478,15 +5493,17 @@ sub SSCam_camop_parse ($) {
 				}
 
 				#####  eine Schnapschussgalerie soll angezeigt oder als Bulk versendet werden  #####
+                my $tac = SSCam_openOrgetTrans($hash);       # Transaktion vorhandenen Code holen
                 if($OpMode eq "getsnapgallery") {
 				    if($hash->{HELPER}{CANSENDSNAP} || $hash->{HELPER}{CANTELESNAP}) {
 					    # es sollen die Anzahl "$hash->{HELPER}{SNAPNUM}" Schnappschüsse versendet werden
 						my $i = 0;
 						my $sn = 0;
-                        my %sendsnaps = ();  # Schnappschuss Hash zum Versand wird leer erstellt
 
                         if($hash->{HELPER}{".SNAPHASH"}) {
-                            $hash->{HELPER}{".SNAPHASHOLD"} = delete($hash->{HELPER}{".SNAPHASH"});
+                        	foreach my $key (sort(keys%{$hash->{HELPER}{".SNAPHASH"}})) {
+                                $hash->{HELPER}{".SNAPHASHOLD"}{$key} = delete($hash->{HELPER}{".SNAPHASH"}{$key});
+	                        }    
                         }
                             
 						while ($data->{'data'}{'data'}[$i]) {
@@ -5507,10 +5524,10 @@ sub SSCam_camop_parse ($) {
 							my $imageData = $data->{data}{data}[$i]{imageData};  # Image data of snapshot in base64 format 
 						    
                             # Schnappschuss Hash zum Versand wird erstellt
-							$sendsnaps{$sn}{snapid}       = $snapid;
-							$sendsnaps{$sn}{createdTm}    = $createdTm;
-							$sendsnaps{$sn}{fileName}     = $fileName;
-							$sendsnaps{$sn}{".imageData"} = $imageData;
+							$data{SSCam}{$name}{SENDSNAPS}{$tac}{$sn}{snapid}       = $snapid;
+							$data{SSCam}{$name}{SENDSNAPS}{$tac}{$sn}{createdTm}    = $createdTm;
+							$data{SSCam}{$name}{SENDSNAPS}{$tac}{$sn}{fileName}     = $fileName;
+							$data{SSCam}{$name}{SENDSNAPS}{$tac}{$sn}{".imageData"} = $imageData;
 							Log3($name,4, "$name - Snap '$sn' added to send gallery hash: ID => $snapid, File => $fileName, Created => $createdTm");
                         
                             # Snaphash erstellen 
@@ -5530,17 +5547,16 @@ sub SSCam_camop_parse ($) {
                                                													
                         if($hash->{HELPER}{".SNAPHASHOLD"} && $sgn > $ss) {
                             for my $kn ($ss..($sgn-1)) {
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{snapid}     = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{snapid};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{createdTm}  = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{createdTm};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{fileName}   = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{fileName};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{imageData}  = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{imageData}; 
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{snapid}     = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{snapid};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{createdTm}  = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{createdTm};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{fileName}   = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{fileName};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{imageData}  = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{imageData}; 
                                 $sn += 1;                            
                             }
-                            delete $hash->{HELPER}{".SNAPHASHOLD"};
                         }
                         
 					    # prüfen ob Schnappschuß versendet werden soll
-				        SSCam_prepareSendData ($hash, $OpMode, \%sendsnaps);
+				        SSCam_prepareSendData ($hash, $OpMode, $data{SSCam}{$name}{SENDSNAPS}{$tac});
 						
 					} else {
                         # es soll eine Schnappschußgalerie bereitgestellt (Attr snapGalleryBoost=1) bzw. gleich angezeigt 
@@ -5551,7 +5567,9 @@ sub SSCam_camop_parse ($) {
                         $hash->{HELPER}{TOTALCNT} = $data->{data}{total};  # total Anzahl Schnappschüsse
                         
                         if($hash->{HELPER}{".SNAPHASH"}) {
-                            $hash->{HELPER}{".SNAPHASHOLD"} = delete($hash->{HELPER}{".SNAPHASH"});
+                        	foreach my $key (sort(keys%{$hash->{HELPER}{".SNAPHASH"}})) {
+                                $hash->{HELPER}{".SNAPHASHOLD"}{$key} = delete($hash->{HELPER}{".SNAPHASH"}{$key});
+	                        }
                         }
                         
                         while ($data->{'data'}{'data'}[$i]) {
@@ -5588,13 +5606,12 @@ sub SSCam_camop_parse ($) {
                         $sn     = 0; 
                         if($hash->{HELPER}{".SNAPHASHOLD"} && $sgn > $ss) {
                             for my $kn ($ss..($sgn-1)) {
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{snapid}     = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{snapid};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{createdTm}  = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{createdTm};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{fileName}   = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{fileName};
-                                $hash->{HELPER}{".SNAPHASH"}{$kn}{imageData}  = $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{imageData}; 
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{snapid}     = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{snapid};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{createdTm}  = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{createdTm};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{fileName}   = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{fileName};
+                                $hash->{HELPER}{".SNAPHASH"}{$kn}{imageData}  = delete $hash->{HELPER}{".SNAPHASHOLD"}{$sn}{imageData}; 
                                 $sn += 1;                            
                             }
-                            delete $hash->{HELPER}{".SNAPHASHOLD"};
                         }
                         
                         # Direktausgabe Snaphash wenn nicht gepollt wird
@@ -5615,9 +5632,10 @@ sub SSCam_camop_parse ($) {
                 readingsBulkUpdate($hash,"Error","none");
                 readingsEndUpdate($hash, 1);                
                 
-                SSCam_closeTrans($hash);                                        # Transaktion beenden
 				delete($hash->{HELPER}{GETSNAPGALLERY});                        # Steuerbit getsnapgallery statt getsnapinfo				
-
+                delete $hash->{HELPER}{".SNAPHASHOLD"};
+                SSCam_closeTrans($hash);                                        # Transaktion beenden
+                
 				########  fallabhängige Eventgenerierung  ########
                 if ($hash->{HELPER}{INFORM} || $hash->{HELPER}{LSNAPBYSTRMDEV}) {
                     # Snap durch SSCamSTRM-Device ausgelöst
@@ -6962,8 +6980,8 @@ sub SSCam_ptzpanel(@) {
   
   return "" if(SSCam_myVersion($hash) <= 71);
   
-  $pbs      = AttrVal("$ptzcdev","ptzButtonSize", 100);                                                     # Größe der Druckbuttons in %
-  $pbsf     = AttrVal("$ptzcdev","ptzButtonSizeFTUI", 100);                                                 # Größe der Druckbuttons im FTUI in %
+  $pbs      = AttrVal($ptzcdev,"ptzButtonSize", 100);                                                     # Größe der Druckbuttons in %
+  $pbsf     = AttrVal($ptzcdev,"ptzButtonSizeFTUI", 100);                                                 # Größe der Druckbuttons im FTUI in %
  
   $ptz_ret  = "";
   $ptz_ret .= "<style>TD.ptzcontrol {padding: 5px 7px;}</style>";
@@ -7222,20 +7240,24 @@ sub SSCam_StreamDev($$$;$) {
       $cmdrefresh    = "ftui.setFhemStatus('set $camname refresh STRM:$uuid')";      
   }
   
-  my $ha     = AttrVal($camname, "htmlattr", 'width="500" height="325"');   # HTML Attribute der Cam
-  $ha        = AttrVal($strmdev, "htmlattr", $ha);                          # htmlattr mit htmlattr Streaming-Device übersteuern 
+  my $ha  = AttrVal($camname, "htmlattr", 'width="500" height="325"');      # HTML Attribute der Cam
+  $ha     = AttrVal($strmdev, "htmlattr", $ha);                             # htmlattr mit htmlattr Streaming-Device übersteuern 
   if($ftui) {
       $ha = AttrVal($strmdev, "htmlattrFTUI", $ha);                         # wenn aus FTUI aufgerufen divers setzen 
   }
   
-  my $pws    = AttrVal($strmdev, "popupWindowSize", "");                    # Größe eines Popups
-  $pws       =~ s/"//g if($pws);
+  my $hb  = AttrVal($strmdev, "hideButtons", 0);                            # Drucktasten im Footer ausblenden ?
+  my $hau = AttrVal($strmdev, "hideAudio", 0);                              # Audio Steuerblock im Footer ausblenden ?
+  
+  my $pws = AttrVal($strmdev, "popupWindowSize", "");                       # Größe eines Popups
+  $pws    =~ s/"//g if($pws);
   
   my $show = $defs{$streamHash->{PARENT}}->{HELPER}{ACTSTRM} if($streamHash->{MODEL} =~ /switched/);
   $show = $show?"($show)":"";
   
-  my $alias  = AttrVal($strmdev, "alias", $strmdev);                         # Linktext als Aliasname oder Devicename setzen
+  my $alias  = AttrVal($strmdev, "alias", $strmdev);                        # Linktext als Aliasname oder Devicename setzen
   my $dlink  = "<a href=\"/fhem?detail=$strmdev\">$alias</a>";
+  $dlink     = $alias if(AttrVal($strmdev, "noLink", 0));                   # keine Links im Stream-Dev generieren
   
   my $StmKey = ReadingsVal($camname,"StmKey",undef);
   
@@ -7315,15 +7337,16 @@ sub SSCam_StreamDev($$$;$) {
           $streamHash->{HELPER}{STREAM}       = "<img src=$link $pws>";    # Stream für "get <SSCamSTRM-Device> popupStream" speichern
           $streamHash->{HELPER}{STREAMACTIVE} = 1 if($link);               # Statusbit wenn ein Stream aktiviert ist      
       }
-            
-      if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
-             # Aufnahmebutton endlos Start
-             $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
-          }	else {
-             # Aufnahmebutton Stop
-             $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
-          }	      
-      $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";               
+      if(!$hb) {
+          if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
+                 # Aufnahmebutton endlos Start
+                 $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
+              }	else {
+                 # Aufnahmebutton Stop
+                 $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
+              }	      
+          $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>"; 
+      }      
       $ret .= "</td>";      
       if(AttrVal($camname,"ptzPanel_use",1)) {
           my $ptz_ret = SSCam_ptzpanel($camname,$strmdev,'',$ftui);
@@ -7331,7 +7354,7 @@ sub SSCam_StreamDev($$$;$) {
               $ret .= "<td>$ptz_ret</td>";
           }
       }
-      if($audiolink && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/) {
+      if($audiolink && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/  && !$hau) {
           $ret .= '</tr>';
           $ret .= '<tr class="odd">';
           $ret .= "<td><audio src=$audiolink preload='none' volume='0.5' controls>
@@ -7350,7 +7373,9 @@ sub SSCam_StreamDev($$$;$) {
           } else {
               $ret .= "<td><img src='data:image/jpeg;base64,$link' $gattr><br>";
           }
-          $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";
+          if(!$hb) {
+              $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";
+          }
           $ret .= "</td>";
           $streamHash->{HELPER}{STREAM} = "<img src=data:image/jpeg;base64,$link $pws>";      # Stream für "get <SSCamSTRM-Device> popupStream" speichern
           $streamHash->{HELPER}{STREAMACTIVE} = 1 if($link);                                  # Statusbit wenn ein Stream aktiviert ist
@@ -7392,16 +7417,18 @@ sub SSCam_StreamDev($$$;$) {
       }
       $ret .= "<br>";
       Log3($strmdev, 4, "$strmdev - generic Stream params:\n$htag");
-      $ret .= "<a onClick=\"$cmdrefresh\" onmouseover=\"Tip('$ttrefresh')\" onmouseout=\"UnTip()\">$imgrefresh </a>";
-      $ret .= $imgblank;
-      if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
-             # Aufnahmebutton endlos Start
-             $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
-          }	else {
-             # Aufnahmebutton Stop
-             $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
-          }	      
-      $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";               
+      if(!$hb) {
+          $ret .= "<a onClick=\"$cmdrefresh\" onmouseover=\"Tip('$ttrefresh')\" onmouseout=\"UnTip()\">$imgrefresh </a>";
+          $ret .= $imgblank;
+          if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
+                 # Aufnahmebutton endlos Start
+                 $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
+              }	else {
+                 # Aufnahmebutton Stop
+                 $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
+              }	      
+          $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";
+      }      
       $ret .= "</td>";      
       if(AttrVal($camname,"ptzPanel_use",1)) {
           my $ptz_ret = SSCam_ptzpanel($camname,$strmdev,'',$ftui);
@@ -7437,17 +7464,18 @@ sub SSCam_StreamDev($$$;$) {
       
       $streamHash->{HELPER}{STREAM} = "<video $pws id=video_$d></video>";  # Stream für "set <SSCamSTRM-Device> popupStream" speichern   
       $streamHash->{HELPER}{STREAMACTIVE} = 1;                             # Statusbit wenn ein Stream aktiviert ist
-      
-      $ret .= "<a onClick=\"$cmdrefresh\" onmouseover=\"Tip('$ttrefresh')\" onmouseout=\"UnTip()\">$imgrefresh </a>";
-      $ret .= $imgblank;
-      if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
-             # Aufnahmebutton endlos Start
-             $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
-          }	else {
-             # Aufnahmebutton Stop
-             $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
-          }	      
-      $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>";               
+      if(!$hb) {
+          $ret .= "<a onClick=\"$cmdrefresh\" onmouseover=\"Tip('$ttrefresh')\" onmouseout=\"UnTip()\">$imgrefresh </a>";
+          $ret .= $imgblank;
+          if(ReadingsVal($camname, "Record", "Stop") eq "Stop") {
+                 # Aufnahmebutton endlos Start
+                 $ret .= "<a onClick=\"$cmdrecendless\" onmouseover=\"Tip('$ttrecstart')\" onmouseout=\"UnTip()\">$imgrecendless </a>";
+              }	else {
+                 # Aufnahmebutton Stop
+                 $ret .= "<a onClick=\"$cmdrecstop\" onmouseover=\"Tip('$ttrecstop')\" onmouseout=\"UnTip()\">$imgrecstop </a>";
+              }	      
+          $ret .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>"; 
+      }      
       $ret .= "</td>";      
       if(AttrVal($camname,"ptzPanel_use",1)) {
           my $ptz_ret = SSCam_ptzpanel($camname,$strmdev,'',$ftui);
@@ -7492,7 +7520,7 @@ sub SSCam_StreamDev($$$;$) {
                       $ret .= "<td>$ptz_ret</td>";
                   }
               }
-              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/) {
+              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/ && !$hau) {
                   $ret .= "</tr>";
                   $ret .= '<tr class="odd">';
                   $ret .= "<td><audio src=$hash->{HELPER}{AUDIOLINK} preload='none' volume='0.5' controls>
@@ -7519,7 +7547,7 @@ sub SSCam_StreamDev($$$;$) {
               $ret .= "<a onClick=\"$cmdstop\" onmouseover=\"Tip('$ttcmdstop')\" onmouseout=\"UnTip()\">$imgstop </a>";
               $ret .= "<a onClick=\"$cmdrefresh\" onmouseover=\"Tip('$ttrefresh')\" onmouseout=\"UnTip()\">$imgrefresh </a>";              
               $ret .= "</td>";
-              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/) {
+              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/  && !$hau) {
                   $ret .= '</tr>';
                   $ret .= '<tr class="odd">';
                   $ret .= "<td><audio src=$hash->{HELPER}{AUDIOLINK} preload='none' volume='0.5' controls>
@@ -7545,7 +7573,7 @@ sub SSCam_StreamDev($$$;$) {
               $streamHash->{HELPER}{STREAMACTIVE} = 1 if($link);         # Statusbit wenn ein Stream aktiviert ist
               $ret .= "<a onClick=\"$cmdstop\" onmouseover=\"Tip('$ttcmdstop')\" onmouseout=\"UnTip()\">$imgstop </a>"; 
               $ret .= "</td>";
-              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/) {
+              if($hash->{HELPER}{AUDIOLINK} && ReadingsVal($camname, "CamAudioType", "Unknown") !~ /Unknown/  && !$hau) {
                   $ret .= '</tr>';
                   $ret .= '<tr class="odd">';
                   $ret .= "<td><audio src=$hash->{HELPER}{AUDIOLINK} preload='none' volume='0.5' controls>
@@ -7703,7 +7731,7 @@ sub SSCam_composegallery ($;$$$) {
                  ? ReadingsTimestamp($name,"LastSnapTime"," ") 
 				 : ReadingsTimestamp($name,"LastUpdateTime"," "));  # letzte Aktualisierung
   $lupt =~ s/ / \/ /;
-  my ($alias,$dlink) = ("","");
+  my ($alias,$dlink,$hb) = ("","","");
   
   # Kontext des SSCamSTRM-Devices speichern für SSCam_refresh
   $hash->{HELPER}{STRMDEV}    = $strmdev;                                                     # Name des aufrufenden SSCamSTRM-Devices
@@ -7715,7 +7743,11 @@ sub SSCam_composegallery ($;$$$) {
 	  $uuid = $streamHash->{FUUID};                                                           # eindeutige UUID des Streamingdevices
 	  delete $streamHash->{HELPER}{STREAM};
       $alias  = AttrVal($strmdev, "alias", $strmdev);                                         # Linktext als Aliasname oder Devicename setzen
-      $dlink  = "<a href=\"/fhem?detail=$strmdev\">$alias</a>";  
+      if(AttrVal($strmdev, "noLink", 0)) {      
+          $dlink = $alias;                                                                    # keine Links im Stream-Dev generieren
+      } else {
+          $dlink = "<a href=\"/fhem?detail=$strmdev\">$alias</a>"; 
+      }
   }
   
   my $cmddosnap     = "FW_cmd('$FW_ME$FW_subdir?XHR=1&cmd=set $name snap 1 2 STRM:$uuid')";   # Snapshot auslösen mit Kennzeichnung "by STRM-Device"
@@ -7734,10 +7766,10 @@ sub SSCam_composegallery ($;$$$) {
       $pws = AttrVal($strmdev, "popupWindowSize", "");                                        # Größe eines Popups (umgelegt: Forum:https://forum.fhem.de/index.php/topic,45671.msg927912.html#msg927912)
       $pws =~ s/"//g if($pws);
       $ha  = AttrVal($strmdev, "htmlattr", $ha);                                              # htmlattr vom SSCamSTRM-Device übernehmen falls von SSCamSTRM-Device aufgerufen und gesetzt                                                 
+      $hb  = AttrVal($strmdev, "hideButtons", 0);                                             # Drucktasten im unteren Bereich ausblenden ?
       if($ftui) {
           $ha = AttrVal($strmdev, "htmlattrFTUI", $ha);                                       # wenn aus FTUI aufgerufen divers setzen 
       }
-  
   }
   
   # wenn SSCamSTRM-device genutzt wird und attr "snapGalleryBoost" nicht gesetzt ist -> Warnung in Gallerie ausgeben
@@ -7756,12 +7788,15 @@ sub SSCam_composegallery ($;$$$) {
   }
   
   # Header Generierung
-  my $header;  
-  if($ftui) {
-      $header .= "$dlink <br>"  if(!AttrVal($strmdev,"hideDisplayNameFTUI",0));
-  } else {
-      $header .= "$dlink <br>"  if(!AttrVal($strmdev,"hideDisplayName",0));
+  my $header;
+  if($strmdev) {                                                                             # Forum: https://forum.fhem.de/index.php/topic,45671.msg975610.html#msg975610
+      if($ftui) {
+          $header .= "$dlink <br>"  if(!AttrVal($strmdev,"hideDisplayNameFTUI",0));
+      } else {
+          $header .= "$dlink <br>"  if(!AttrVal($strmdev,"hideDisplayName",0));
+      } 
   } 
+  
   if ($lang eq "EN") {
       $header .= "Snapshots ($limit/$totalcnt) of camera <b>$camname</b> - newest Snapshot: $lss<br>";
 	  $header .= " (Possibly another snapshots are available. Last recall: $lupt)<br>" if(AttrVal($name,"snapGalleryBoost",0));
@@ -7813,7 +7848,9 @@ sub SSCam_composegallery ($;$$$) {
   $htmlCode .= "</tbody>";
   $htmlCode .= "</table>";
   $htmlCode .= "</div>";
-  $htmlCode .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>" if($strmdev);
+  if(!$hb) {
+      $htmlCode .= "<a onClick=\"$cmddosnap\" onmouseover=\"Tip('$ttsnap')\" onmouseout=\"UnTip()\">$imgdosnap </a>" if($strmdev);
+  }
   $htmlCode .= "</html>";
 
 return $htmlCode;
@@ -7914,10 +7951,10 @@ return;
 #############################################################################################
 #                              Vorbereitung  SMTP EMail-Versand
 #       $OpMode = aktueller Operation Mode zur Unterscheidung was versendet werden soll
-#       $data   = zu versendende Daten, evtl. als Hash Referenz
+#       $dat   = zu versendende Daten, evtl. als Hash Referenz
 #############################################################################################
 sub SSCam_prepareSendData ($$;$) { 
-   my ($hash, $OpMode, $data) = @_;
+   my ($hash, $OpMode, $dat) = @_;
    my $name   = $hash->{NAME};
    my $calias = AttrVal($name,"alias",$hash->{CAMNAME});              # Alias der Kamera wenn gesetzt oder Originalname aus SVS
    my ($ret,$sdat,$vdat,$fname,$snapid,$lsnaptime,$tac) = ('','','','','','');
@@ -7933,11 +7970,11 @@ sub SSCam_prepareSendData ($$;$) {
            $asref = $svshash->{HELPER}{ALLSNAPREF};                    # Hashreferenz zum summarischen Snaphash
            foreach my $key (keys%{$asref}) {
                if($key eq $name) {                                     # Kamera Key im Bildhash matcht -> Bilddaten übernehmen
-                    foreach my $pkey (keys%{$data}) {
+                    foreach my $pkey (keys%{$dat}) {
                         my $nkey = time()+int(rand(1000));
-                        $asref->{$nkey.$pkey}{createdTm}    = $data->{$pkey}{createdTm};     # Aufnahmezeit der Kamera werden im summarischen Snaphash eingefügt
-                        $asref->{$nkey.$pkey}{".imageData"} = $data->{$pkey}{".imageData"};  # Bilddaten der Kamera werden im summarischen Snaphash eingefügt
-                        $asref->{$nkey.$pkey}{fileName}     = $data->{$pkey}{fileName};      # Filenamen der Kamera werden im summarischen Snaphash eingefügt
+                        $asref->{$nkey.$pkey}{createdTm}    = $dat->{$pkey}{createdTm};     # Aufnahmezeit der Kamera werden im summarischen Snaphash eingefügt
+                        $asref->{$nkey.$pkey}{".imageData"} = $dat->{$pkey}{".imageData"};  # Bilddaten der Kamera werden im summarischen Snaphash eingefügt
+                        $asref->{$nkey.$pkey}{fileName}     = $dat->{$pkey}{fileName};      # Filenamen der Kamera werden im summarischen Snaphash eingefügt
                     }
                     delete $hash->{HELPER}{CANSENDSNAP};               
                     delete $asref->{$key};                             # ursprünglichen Key (Kameranamen) löschen
@@ -7949,13 +7986,17 @@ sub SSCam_prepareSendData ($$;$) {
                    return;                                             # Bildhash noch nicht komplett                                 
                }
            }
-           my %rs  = %{$asref};
+       
            delete $svshash->{HELPER}{ALLSNAPREF};                      # ALLSNAPREF löschen -> gemeinsamer Versand beendet
            $hash   = $svshash;                                         # Hash durch SVS-Hash ersetzt
-           $name   = $svshash->{NAME};                                 # Name des auslösenden SVS-Devices wird eingesetzt
-           $data   = \%rs;                                             # Referenz zum summarischen Hash einsetzen
+           $name   = $svshash->{NAME};                                 # Name des auslösenden SVS-Devices wird eingesetzt                                        
+           delete $data{SSCam}{RS};
+           foreach my $key (keys%{$asref}) {                           # Referenz zum summarischen Hash einsetzen        
+               $data{SSCam}{RS}{$key} = delete $asref->{$key};                                         
+           }   
+           $dat    = $data{SSCam}{RS};                                 # Referenz zum summarischen Hash einsetzen
            $calias = AttrVal($name,"alias",$hash->{NAME});             # Alias des SVS-Devices 
-           $hash->{HELPER}{TRANSACTION} = "multiple_ta";               # fake Transaction im SVS Device setzen 
+           $hash->{HELPER}{TRANSACTION} = "multiple_snapsend";         # fake Transaction im SVS Device setzen 
            last;                                                       # Schleife verlassen und mit Senden weiter
        }
    }
@@ -7972,6 +8013,8 @@ sub SSCam_prepareSendData ($$;$) {
        $sslfrominit = 1;
        $smtpsslport = AttrVal($name,"smtpSSLPort",0);
    }
+   
+   $tac = $hash->{HELPER}{TRANSACTION};               # Code der laufenden Transaktion
    
    ### Schnappschüsse als Email versenden wenn $hash->{HELPER}{CANSENDSNAP} definiert ist
    if($OpMode =~ /^getsnap/ && $hash->{HELPER}{CANSENDSNAP}) {     
@@ -7996,9 +8039,7 @@ sub SSCam_prepareSendData ($$;$) {
        $smtpmsg{$subjk} = "$subjt";
        $smtpmsg{$bodyk} = "$bodyt";
        
-       $tac = $hash->{HELPER}{TRANSACTION};               # Code der laufenden Transaktion
-       
-       $sdat = $data;       
+       $sdat = $dat;       
        $ret = SSCam_sendEmail($hash, {'subject'      => $smtpmsg{subject},   
                                       'part1txt'     => $smtpmsg{body}, 
                                       'part2type'    => 'image/jpeg',
@@ -8036,7 +8077,7 @@ sub SSCam_prepareSendData ($$;$) {
        $smtpmsg{$subjk} = "$subjt";
        $smtpmsg{$bodyk} = "$bodyt";
        
-       $vdat = $data;        
+       $vdat = $dat;        
        $ret = SSCam_sendEmail($hash, {'subject'      => $smtpmsg{subject},   
                                       'part1txt'     => $smtpmsg{body}, 
                                       'part2type'    => 'video/mpeg',
@@ -8045,7 +8086,8 @@ sub SSCam_prepareSendData ($$;$) {
                                       'opmode'       => $OpMode,
                                       'smtpnousessl' => $nousessl,
                                       'sslfrominit'  => $sslfrominit,
-                                      'smtpsslport'  => $smtpsslport,                                  
+                                      'smtpsslport'  => $smtpsslport,
+                                      'tac'          => $tac,                                      
                                      }
                              );
    }
@@ -8080,9 +8122,7 @@ sub SSCam_prepareSendData ($$;$) {
 	   $telemsg{$peerk} = "$peert" if($peert);
        $telemsg{$subjk} = "$subjt" if($subjt);
        
-       $tac = $hash->{HELPER}{TRANSACTION};               # Code der laufenden Transaktion
-       
-       $sdat = $data;  
+       $sdat = $dat;  
        $ret = SSCam_sendTelegram($hash, {'subject'      => $telemsg{subject},
                                          'part2type'    => 'image/jpeg',
                                          'sdat'         => $sdat,
@@ -8125,12 +8165,13 @@ sub SSCam_prepareSendData ($$;$) {
 	   $telemsg{$peerk} = "$peert" if($peert);
        $telemsg{$subjk} = "$subjt" if($subjt);
        
-       $vdat = $data;  
+       $vdat = $dat;  
        $ret = SSCam_sendTelegram($hash, {'subject'      => $telemsg{subject},
                                          'vdat'         => $vdat,
                                          'opmode'       => $OpMode, 
                                          'telebot'      => $telemsg{$tbotk}, 
-                                         'peers'        => $telemsg{$peerk},                                      
+                                         'peers'        => $telemsg{$peerk},
+                                         'tac'          => $tac,                                         
                                          'MediaStream'  => '-30',                       # Code für MediaStream im TelegramBot (png/jpg = -1)
                                         }
                                 );                   
@@ -8168,23 +8209,24 @@ sub SSCam_sendTelegram ($$) {
        'MediaStream'  => {                       'default'=>'',                          'required'=>0, 'set'=>1},  # Code für MediaStream im TelegramBot (png/jpg = -1)
        );   
    
-   my %params = (); 
+   my $tac = $extparamref->{tac};
+   
    foreach my $key (keys %SSCam_teleparams) {
-       $params{$key} = AttrVal($name, $SSCam_teleparams{$key}->{attr}, $SSCam_teleparams{$key}->{default}) 
-                                                                if(exists $SSCam_teleparams{$key}->{attr}); 
+       $data{SSCam}{$name}{PARAMS}{$tac}{$key} = AttrVal($name, $SSCam_teleparams{$key}->{attr}, $SSCam_teleparams{$key}->{default}) 
+                                                   if(exists $SSCam_teleparams{$key}->{attr}); 
 	   if($SSCam_teleparams{$key}->{set}) {       
-           $params{$key} = $extparamref->{$key} if(exists $extparamref->{$key});
-           $params{$key} = $SSCam_teleparams{$key}->{default} if (!$extparamref->{$key} && !$SSCam_teleparams{$key}->{attr});
+           $data{SSCam}{$name}{PARAMS}{$tac}{$key} = $extparamref->{$key} if(exists $extparamref->{$key});
+           $data{SSCam}{$name}{PARAMS}{$tac}{$key} = $SSCam_teleparams{$key}->{default} if (!$extparamref->{$key} && !$SSCam_teleparams{$key}->{attr});
 	   }
-       Log3($name, 4, "$name - param $key is now \"".$params{$key}."\" ") if($key !~ /[sv]dat/);
-       Log3($name, 4, "$name - param $key is set") if($key =~ /[sv]dat/ && $params{$key} ne '');
+       Log3($name, 4, "$name - param $key is now \"".$data{SSCam}{$name}{PARAMS}{$tac}{$key}."\" ") if($key !~ /[sv]dat/);
+       Log3($name, 4, "$name - param $key is set") if($key =~ /[sv]dat/ && $data{SSCam}{$name}{PARAMS}{$tac}{$key} ne '');
    }
    
-   $params{name} = $name;
+   $data{SSCam}{$name}{PARAMS}{$tac}{name} = $name;
    
    my @err = ();
    foreach my $key (keys(%SSCam_teleparams)) {
-       push(@err, $key) if ($SSCam_teleparams{$key}->{required} && !$params{$key});
+       push(@err, $key) if ($SSCam_teleparams{$key}->{required} && !$data{SSCam}{$name}{PARAMS}{$tac}{$key});
    }
    if ($#err >= 0) {
        $ret = "Missing at least one required parameter or attribute: ".join(', ',@err);
@@ -8195,10 +8237,10 @@ sub SSCam_sendTelegram ($$) {
        return $ret;
    }
    
-   my $telebot            = $params{telebot};
-   my $peers              = $params{peers}; 
-   my $sdat               = $params{sdat};                     # Hash von Imagedaten base64 codiert
-   my $vdat               = $params{vdat};                     # Hashref der Videodaten   
+   my $telebot            = $data{SSCam}{$name}{PARAMS}{$tac}{telebot};
+   my $peers              = $data{SSCam}{$name}{PARAMS}{$tac}{peers}; 
+   my $sdat               = $data{SSCam}{$name}{PARAMS}{$tac}{sdat};                     # Hash von Imagedaten base64 codiert
+   my $vdat               = $data{SSCam}{$name}{PARAMS}{$tac}{vdat};                     # Hashref der Videodaten   
    
    if(!$defs{$telebot}) {
        $ret = "No TelegramBot device \"$telebot\" available";
@@ -8206,8 +8248,6 @@ sub SSCam_sendTelegram ($$) {
        Log3($name, 2, "$name - $ret");
        return;
    }
-   
-   $hash->{HELPER}{PAREF} = \%params;
   
    if(!$peers) {
        $peers = AttrVal($telebot,"defaultPeer", "");
@@ -8225,7 +8265,7 @@ sub SSCam_sendTelegram ($$) {
       ### Images liegen in einem Hash (Ref in $sdat) base64-codiert vor
       my @as = sort{$b<=>$a}keys%{$sdat};
       foreach my $key (@as) {
-           ($msg,$subject,$MediaStream,$fname) = SSCam_extractForTelegram($name,$key);
+           ($msg,$subject,$MediaStream,$fname) = SSCam_extractForTelegram($name,$key,$data{SSCam}{$name}{PARAMS}{$tac});
 		   $ret = SSCam_TBotSendIt($defs{$telebot}, $name, $fname, $peers, $msg, $subject, $MediaStream, undef, "");
 		   if($ret) {
 			   readingsSingleUpdate($hash, "sendTeleState", $ret, 1);
@@ -8241,7 +8281,7 @@ sub SSCam_sendTelegram ($$) {
   if($vdat) {
       ### Aufnahmen liegen in einem Hash-Ref in $vdat vor
       my $key = 0;
-      ($msg,$subject,$MediaStream,$fname) = SSCam_extractForTelegram($name,$key);
+      ($msg,$subject,$MediaStream,$fname) = SSCam_extractForTelegram($name,$key,$data{SSCam}{$name}{PARAMS}{$tac});
       $ret = SSCam_TBotSendIt($defs{$telebot}, $name, $fname, $peers, $msg, $subject, $MediaStream, undef, "");
 	  if($ret) {
 	      readingsSingleUpdate($hash, "sendTeleState", $ret, 1);
@@ -8254,7 +8294,6 @@ sub SSCam_sendTelegram ($$) {
   }
   
   use strict "refs";
-  undef %params;        # erstellten Versandhash löschen
   
 return;
 }
@@ -8262,14 +8301,13 @@ return;
 ####################################################################################################
 #                                Bilddaten extrahieren für Telegram Versand
 ####################################################################################################
-sub SSCam_extractForTelegram($$) {
-  my ($name,$key)  = @_;
-  my $hash         = $defs{$name};
-  my $paref        = $hash->{HELPER}{PAREF};
-  my $subject      = $paref->{subject};
-  my $MediaStream  = $paref->{MediaStream};
-  my $sdat         = $paref->{sdat};                     # Hash von Imagedaten base64 codiert
-  my $vdat         = $paref->{vdat};                     # Hashref der Videodaten   
+sub SSCam_extractForTelegram($$$) {
+  my ($name,$key,$paref) = @_;
+  my $hash               = $defs{$name};
+  my $subject            = $paref->{subject};
+  my $MediaStream        = $paref->{MediaStream};
+  my $sdat               = $paref->{sdat};                     # Hash von Imagedaten base64 codiert
+  my $vdat               = $paref->{vdat};                     # Hashref der Videodaten   
   my ($data,$fname,$ct);
   
   if($sdat) {
@@ -8676,23 +8714,24 @@ sub SSCam_sendEmail ($$) {
        'vdat'         => {                       'default'=>'',                          'required'=>0, 'set'=>1},  # Videodaten, wenn gesetzt muss 'part2type' auf 'video/mpeg' gesetzt sein
        );   
    
-   my %params = (); 
+   my $tac = $extparamref->{tac};
+   
    foreach my $key (keys %SSCam_mailparams) {
-       $params{$key} = AttrVal($name, $SSCam_mailparams{$key}->{attr}, $SSCam_mailparams{$key}->{default}) 
-                          if(exists $SSCam_mailparams{$key}->{attr}); 
+       $data{SSCam}{$name}{PARAMS}{$tac}{$key} = AttrVal($name, $SSCam_mailparams{$key}->{attr}, $SSCam_mailparams{$key}->{default}) 
+                                                   if(exists $SSCam_mailparams{$key}->{attr}); 
 	   if($SSCam_mailparams{$key}->{set}) {       
-           $params{$key} = $extparamref->{$key} if (exists $extparamref->{$key});
-           $params{$key} = $SSCam_mailparams{$key}->{default} if (!$extparamref->{$key} && !$SSCam_mailparams{$key}->{attr});
+           $data{SSCam}{$name}{PARAMS}{$tac}{$key} = $extparamref->{$key} if (exists $extparamref->{$key});
+           $data{SSCam}{$name}{PARAMS}{$tac}{$key} = $SSCam_mailparams{$key}->{default} if (!$extparamref->{$key} && !$SSCam_mailparams{$key}->{attr});
 	   }
-       Log3($name, 4, "$name - param $key is now \"".$params{$key}."\" ") if($key !~ /sdat/);
-       Log3($name, 4, "$name - param $key is set") if($key =~ /sdat/ && $params{$key} ne '');
+       Log3($name, 4, "$name - param $key is now \"".$data{SSCam}{$name}{PARAMS}{$tac}{$key}."\" ") if($key !~ /sdat/);
+       Log3($name, 4, "$name - param $key is set") if($key =~ /sdat/ && $data{SSCam}{$name}{PARAMS}{$tac}{$key} ne '');
    }
    
-   $params{name} = $name;
+   $data{SSCam}{$name}{PARAMS}{$tac}{name} = $name;
    
    my @err = ();
    foreach my $key (keys(%SSCam_mailparams)) {
-       push(@err, $key) if ($SSCam_mailparams{$key}->{required} && !$params{$key});
+       push(@err, $key) if ($SSCam_mailparams{$key}->{required} && !$data{SSCam}{$name}{PARAMS}{$tac}{$key});
    }
    if ($#err >= 0) {
        $ret = "Missing at least one required parameter or attribute: ".join(', ',@err);
@@ -8703,9 +8742,9 @@ sub SSCam_sendEmail ($$) {
        return $ret;
    }
    
-   $hash->{HELPER}{RUNNING_PID} = BlockingCall("SSCam_sendEmailblocking", \%params, "SSCam_sendEmaildone", $timeout, "SSCam_sendEmailto", $hash);
+   $hash->{HELPER}{RUNNING_PID} = BlockingCall("SSCam_sendEmailblocking", $data{SSCam}{$name}{PARAMS}{$tac}, "SSCam_sendEmaildone", $timeout, "SSCam_sendEmailto", $hash);
    $hash->{HELPER}{RUNNING_PID}{loglevel} = 5 if($hash->{HELPER}{RUNNING_PID});  # Forum #77057
-   
+      
 return;
 }
 
@@ -8992,7 +9031,7 @@ sub SSCam_sendEmaildone($) {
   readingsEndUpdate($hash, 1);
       
   delete($hash->{HELPER}{RUNNING_PID});
-  
+                  
 return;
 }
 
@@ -9073,12 +9112,51 @@ sub SSCam_closeTrans ($) {
    my ($hash) = @_;
    my $name = $hash->{NAME};
    
-   return if(!defined $hash->{HELPER}{TRANSACTION});   
-   my $tac = delete $hash->{HELPER}{TRANSACTION};   # Transaktion beenden
+   return if(!defined $hash->{HELPER}{TRANSACTION});  
+   my $tac = delete $hash->{HELPER}{TRANSACTION};            # Transaktion beenden   
    if (AttrVal($name,"debugactivetoken",0)) {
        Log3($name, 1, "$name - Transaction \"$tac\" closed");
-   }  
+   }
    
+   SSCam_cleanData($name,$tac);                              # $data Hash bereinigen
+   
+return;
+}
+
+####################################################################################################
+#                               $data Hash bereinigen
+####################################################################################################
+sub SSCam_cleanData($;$) {
+  my ($name,$tac) = @_;
+  my $del = 0;
+  
+  delete $data{SSCam}{RS};
+  
+  if($tac) {
+      if($data{SSCam}{$name}{SENDRECS}{$tac}) {
+          delete $data{SSCam}{$name}{SENDRECS}{$tac};
+          $del = 1;
+      }
+      if($data{SSCam}{$name}{SENDSNAPS}{$tac}) {
+          delete $data{SSCam}{$name}{SENDSNAPS}{$tac};
+          $del = 1;
+      }
+      if($data{SSCam}{$name}{PARAMS}{$tac}) {
+          delete $data{SSCam}{$name}{PARAMS}{$tac};
+          $del = 1;
+      }
+      if ($del && AttrVal($name,"debugactivetoken",0)) {
+          Log3($name, 1, "$name - Data Hash (SENDRECS/SENDSNAPS/PARAMS) of Transaction \"$tac\" deleted");
+      }
+  } else {
+      delete $data{SSCam}{$name}{SENDRECS};
+      delete $data{SSCam}{$name}{SENDSNAPS};
+      delete $data{SSCam}{$name}{PARAMS};
+      if (AttrVal($name,"debugactivetoken",0)) {
+          Log3($name, 1, "$name - Data Hash (SENDRECS/SENDSNAPS/PARAMS) deleted");
+      }      
+  }
+
 return;
 }
 
@@ -9107,12 +9185,12 @@ sub SSCam_setVersionInfo($) {
   if($modules{$type}{META}{x_prereqs_src} && !$hash->{HELPER}{MODMETAABSENT}) {
 	  # META-Daten sind vorhanden
 	  $modules{$type}{META}{version} = "v".$v;              # Version aus META.json überschreiben, Anzeige mit {Dumper $modules{SMAPortal}{META}}
-	  if($modules{$type}{META}{x_version}) {                                                                             # {x_version} ( nur gesetzt wenn $Id: 49_SSCam.pm 19846 2019-07-17 22:54:45Z DS_Starter $ im Kopf komplett! vorhanden )
+	  if($modules{$type}{META}{x_version}) {                                                                             # {x_version} ( nur gesetzt wenn $Id: 49_SSCam.pm 20248 2019-09-25 22:05:50Z DS_Starter $ im Kopf komplett! vorhanden )
 		  $modules{$type}{META}{x_version} =~ s/1.1.1/$v/g;
 	  } else {
 		  $modules{$type}{META}{x_version} = $v; 
 	  }
-	  return $@ unless (FHEM::Meta::SetInternals($hash));                                                                # FVERSION wird gesetzt ( nur gesetzt wenn $Id: 49_SSCam.pm 19846 2019-07-17 22:54:45Z DS_Starter $ im Kopf komplett! vorhanden )
+	  return $@ unless (FHEM::Meta::SetInternals($hash));                                                                # FVERSION wird gesetzt ( nur gesetzt wenn $Id: 49_SSCam.pm 20248 2019-09-25 22:05:50Z DS_Starter $ im Kopf komplett! vorhanden )
 	  if(__PACKAGE__ eq "FHEM::$type" || __PACKAGE__ eq $type) {
 	      # es wird mit Packages gearbeitet -> Perl übliche Modulversion setzen
 		  # mit {<Modul>->VERSION()} im FHEMWEB kann Modulversion abgefragt werden
@@ -10549,10 +10627,13 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
   
         <ul>
 		<b>Examples:</b><br>
-        attr &lt;name&gt; hlsStrmObject https://video-dev.github.io/streams/x36xhzz/x36xhzz.m3u8  <br>
-        # a video stream used for testing the streaming device function (internet connection is needed) <br><br>
+        attr &lt;name&gt; hlsStrmObject https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8  <br>
+        attr &lt;name&gt; hlsStrmObject https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8  <br>
+        # Sample video streams used for testing the streaming device function (internet connection is needed) <br><br>
+        
         attr &lt;name&gt; hlsStrmObject http://192.168.2.10:32000/CamHE1.m3u8  <br>
         # playback a HLS video stream of a camera witch is delivered by e.g. a ffmpeg conversion process   <br><br>
+        
         attr &lt;name&gt; hlsStrmObject http://192.168.2.10:32000/$NAME.m3u8  <br>
         # Same as example above, but use the replacement with variable $NAME for "CamHE1"     
         </ul>
@@ -10690,14 +10771,15 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
   </li>
   
   <a name="recTelegramTxt"></a>
-  <li><b>snapTelegramTxt tbot => &lt;TelegramBot device&gt;, peers => [&lt;peer1 peer2 ...&gt;], subject => [&lt;subject text&gt;]  </b><br>
+  <li><b>recTelegramTxt tbot => &lt;TelegramBot device&gt;, peers => [&lt;peer1 peer2 ...&gt;], subject => [&lt;subject text&gt;]  </b><br>
     Activates the permanent shipping of recordings by TelegramBot after their creation. <br>
     The attribute has to be definied in the form as described. With key "tbot" the TelegramBot device is specified, 
 	which is used for shipping the data. Of course, the <a href="http://fhem.de/commandref.html#TelegramBot">TelegramBot device</a> 
     must be available and has to be running well. <br>
 	The setting of "peers" and "subject" is optional, but the keys must (empty) specified. 
-	If "peer" is empty, teh default peer of the TelegramBot is used. <br>
-	You can use the following placeholders in "subject". <br><br>
+	If "peer" is empty, the default peer of the TelegramBot device is used. <br><br>
+    
+	You can use the following placeholders within "subject". <br><br>
 	
 		<ul>   
 		<table>  
@@ -10711,14 +10793,14 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 		</ul>     
 		<br>	
     
-       <ul>
-		<b>Examples:</b><br>
-        recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm ($FILE)  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm from $CAM. At $CTIME the recording $FILE was created. Now it is $TIME. <br>
-      </ul>
-      <br>
+	<b>Examples:</b><br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm ($FILE)  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; #nabugroup, subject =&gt;  <br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; -123456, subject =&gt;  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm from $CAM. At $CTIME the recording $FILE was created. Now it is $TIME. <br>
+    <br>
   </li><br>	 
   
   <a name="rectime"></a>
@@ -10822,8 +10904,9 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 	which is used for shipping the data. Of course, the <a href="http://fhem.de/commandref.html#TelegramBot">TelegramBot device</a> 
     must be available and has to be running well. <br>
 	The setting of "peers" and "subject" is optional, but the keys must (empty) specified. 
-	If "peer" is empty, teh default peer of the TelegramBot is used. <br>
-	You can use the following placeholders in "subject". <br><br>
+	If "peer" is empty, the default peer of the TelegramBot device is used. <br><br>
+    
+	You can use the following placeholders within "subject". <br><br>
 	
 		<ul>   
 		<table>  
@@ -10836,15 +10919,15 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 		</table>
 		</ul>     
 		<br>	
-    
-       <ul>
-		<b>Examples:</b><br>
-        snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm ($FILE)  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm from $CAM. At $CTIME the snapshot $FILE was created <br>
-      </ul>
-      <br>
+
+	<b>Examples:</b><br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm ($FILE)  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; #nabugroup, subject =&gt;  <br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; -123456, subject =&gt;  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Motion alarm from $CAM. At $CTIME the snapshot $FILE was created <br>
+    <br>
   </li><br>	  
     
   <a name="snapGalleryBoost"></a>
@@ -12363,10 +12446,13 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
   
         <ul>
 		<b>Beispiele:</b><br>
-        attr &lt;name&gt; hlsStrmObject https://video-dev.github.io/streams/x36xhzz/x36xhzz.m3u8  <br>
-        # ein Beispielstream der zum Test des Streaming Devices verwendet werden kann (Internetverbindung nötig) <br><br>
+        attr &lt;name&gt; hlsStrmObject https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8  <br>
+        attr &lt;name&gt; hlsStrmObject https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8  <br>
+        # Beispielstreams der zum Test des Streaming Devices verwendet werden kann (Internetverbindung nötig) <br><br>
+        
         attr &lt;name&gt; hlsStrmObject http://192.168.2.10:32000/CamHE1.m3u8  <br>
         # Wiedergabe eines Kamera HLS-Streams der z.B. durch ffmpeg bereitgestellt wird  <br><br>
+        
         attr &lt;name&gt; hlsStrmObject http://192.168.2.10:32000/$NAME.m3u8  <br>
         # Wie obiges Beispiel mit der Variablennutzung für "CamHE1"     
         </ul>
@@ -12511,7 +12597,8 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 	anzugeben, welches für den Versand der Daten verwendet werden soll. 
 	Das <a href="http://fhem.de/commandref_DE.html#TelegramBot">TelegramBot-Device</a> muss natürlich vorhanden und funktionstüchtig sein. <br>
 	Die Angabe von "peers" und "subject" ist optional, jedoch muß der Schlüssel (leer) angegeben werden. 
-	Wurde "peer" leer gelassen, wird der Default-Peer des TelegramBot verwendet. <br>
+	Wurde "peer" leer gelassen, wird der Default-Peer des TelegramBot-Device verwendet. <br><br>
+    
 	Es können die folgenden Platzhalter im subject verwendet werden. <br><br>
 	
 		<ul>   
@@ -12526,13 +12613,13 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 		</ul>     
 		<br>	
     
-       <ul>
-		<b>Beispiele:</b><br>
-        recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm ($FILE)  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
-		recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm bei $CAM. Es wurde $CTIME die Aufnahme $FILE erstellt. Jetzt ist es $TIME. <br>
-      </ul>
+	<b>Beispiele:</b><br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm ($FILE)  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; #nabugroup, subject =&gt;  <br>
+    attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; -123456, subject =&gt;  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
+	attr &lt;device&gt; recTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm bei $CAM. Es wurde $CTIME die Aufnahme $FILE erstellt. Jetzt ist es $TIME. <br>
       <br>
   </li><br>
   
@@ -12640,8 +12727,9 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 	anzugeben, welches für den Versand der Daten verwendet werden soll. 
 	Das <a href="http://fhem.de/commandref_DE.html#TelegramBot">TelegramBot-Device</a> muss natürlich vorhanden und funktionstüchtig sein. <br>
 	Die Angabe von "peers" und "subject" ist optional, jedoch muß der Schlüssel (leer) angegeben werden. 
-	Wurde "peer" leer gelassen, wird der Default-Peer des TelegramBot verwendet. <br>
-	Es können die Platzhalter im subject verwendet werden. <br><br>
+	Wurde "peer" leer gelassen, wird der Default-Peer des TelegramBot-Devices verwendet. <br><br>
+	
+    Es können folgende Platzhalter im subject verwendet werden. <br><br>
 	
 		<ul>   
 		<table>  
@@ -12655,14 +12743,14 @@ attr &lt;name&gt; genericStrmHtmlTag &lt;img $HTMLATTR
 		</ul>     
 		<br>	
     
-       <ul>
-		<b>Beispiele:</b><br>
-        snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm ($FILE)  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
-		snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm bei $CAM. Es wurde $CTIME der Schnappschuss $FILE erstellt <br>
-      </ul>
-      <br>
+	<b>Beispiele:</b><br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm ($FILE)  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; @nabuko @foo @bar, subject =&gt;  <br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; #nabugroup, subject =&gt;  <br>
+    attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; -123456, subject =&gt;  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt;  <br>
+	attr &lt;device&gt; snapTelegramTxt tbot =&gt; teleBot, peers =&gt; , subject =&gt; Bewegungsalarm bei $CAM. Es wurde $CTIME der Schnappschuss $FILE erstellt <br>
+    <br>
   </li><br>
     
   <a name="snapGalleryBoost"></a>

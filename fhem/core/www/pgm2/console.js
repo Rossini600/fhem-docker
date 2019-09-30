@@ -1,14 +1,15 @@
 "use strict";
-FW_version["console.js"] = "$Id: console.js 19890 2019-07-23 14:57:21Z rudolfkoenig $";
+FW_version["console.js"] = "$Id: console.js 19950 2019-08-04 20:03:37Z rudolfkoenig $";
 
 var consConn;
+var debug;
 
 var consFilter, oldFilter, consFType="";
 var consLastIndex = 0;
 var withLog = 0;
 var mustScroll = 1;
 
-log("Event monitor is starting");
+log("Event monitor is starting!");
 
 function
 cons_closeConn()
@@ -59,9 +60,12 @@ consUpdate(evt)
   if(new_content == undefined || new_content.length == 0)
     return;
   log("Console Rcvd: "+new_content);
-  if(new_content.indexOf('<') != 0)
-    new_content = new_content.replace(/ /g, "&nbsp;");
-  
+  // replace space with nbsp to preserve formatting
+  var rTab = {'<':'&lt;', '>':'&gt;',' ':'&nbsp;'};
+  var isTa = $("#console").is("textarea"); // 102773
+  new_content = new_content.replace(/(.*)<br>[\r\n]/g, function(all,p1) {
+    return p1.replace(/[<> ]/g, function(a){return rTab[a]})+(isTa?"\n":"<br>");
+  });
   $("#console").append(new_content);
     
   if(mustScroll)

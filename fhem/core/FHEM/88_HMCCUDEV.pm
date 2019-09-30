@@ -2,9 +2,9 @@
 #
 #  88_HMCCUDEV.pm
 #
-#  $Id: 88_HMCCUDEV.pm 18552 2019-02-10 11:52:28Z zap $
+#  $Id: 88_HMCCUDEV.pm 20134 2019-09-08 12:19:00Z zap $
 #
-#  Version 4.3.008
+#  Version 4.3.010
 #
 #  (c) 2019 zap (zap01 <at> t-online <dot> de)
 #
@@ -340,6 +340,8 @@ sub HMCCUDEV_Set ($@)
 	my $name = shift @$a;
 	my $opt = shift @$a;
 
+	return "No set command specified" if (!defined ($opt));
+
 	# Valid commands for read only devices
 	my $rocmds = "clear config defaults:noArg";
 
@@ -593,9 +595,45 @@ sub HMCCUDEV_Set ($@)
 			$objname .= ':'.$1;
 		}
 
-		my $rc = HMCCU_RPCSetConfig ($hash, $objname, $h);
+		my ($rc, $res) = HMCCU_RPCRequest ($hash, "putParamset", $objname, "MASTER", $h);
+#		my $rc = HMCCU_RPCSetConfig ($hash, $objname, $h);
 		return HMCCU_SetError ($hash, $rc) if ($rc < 0);
 
+		return HMCCU_SetState ($hash, "OK");
+	}
+	elsif ($opt eq 'rpcparameter') {
+		return HMCCU_SetError ($hash, "Usage: set $name rpcparameter { channel VALUES | [channel] MASTER } {parameter}={value} [...]")
+			if ((scalar keys %{$h}) < 1);	
+			
+		my $key;
+		my $chn;
+		my $rc;
+		my $res;
+		
+		while (my $p = shift @$a) {
+			if (uc($p) =~ /^(MASTER|VALUES)$/ && !defined ($key)) {
+				$key = uc($p);
+			}
+			elsif ($p =~ /^([0-9]+)$/ && !defined ($chn)) {
+				HMCCU_SetError ($hash, -7) if ($p >= $hash->{channels});
+				$chn = $p;
+			}
+		}
+		
+		$key = 'VALUES' if (!defined ($key));
+		my $addr = defined ($chn) ? "$ccuaddr:$chn" : $ccuaddr;
+		
+		if ($key eq 'VALUES') {
+			($rc, $res) = HMCCU_SetMultipleParameters ($hash, $addr, $h);
+		}
+		elsif ($key eq 'MASTER') {
+			($rc, $res) = HMCCU_RPCRequest ($hash, "putParamset", $addr, $key, $h);
+		}
+		else {
+			return HMCCU_SetError ($hash, "Key must be MASTER or VALUES");
+		}
+		
+		return HMCCU_SetError ($hash, $rc) if ($rc < 0);
 		return HMCCU_SetState ($hash, "OK");
 	}
 	elsif ($opt eq 'defaults') {
@@ -607,7 +645,7 @@ sub HMCCUDEV_Set ($@)
 		return "HMCCUCHN: Unknown argument $opt, choose one of ".$rocmds
 			if ($hash->{statevals} eq 'readonly');
 
-		my $retmsg = "HMCCUDEV: Unknown argument $opt, choose one of clear config control datapoint defaults:noArg";
+		my $retmsg = "HMCCUDEV: Unknown argument $opt, choose one of clear config control datapoint rpcparameter defaults:noArg";
 		if ($sc ne '') {
 			$retmsg .= " devstate";
 			if ($hash->{statevals} ne '') {
@@ -640,6 +678,8 @@ sub HMCCUDEV_Get ($@)
 	my $name = shift @$a;
 	my $opt = shift @$a;
 
+	return "No get command specified" if (!defined ($opt));
+	
 	# Get I/O device
 	return undef if (!defined ($hash->{ccudevstate}) || $hash->{ccudevstate} eq 'pending' ||
 		!defined ($hash->{IODev}));
@@ -739,7 +779,6 @@ sub HMCCUDEV_Get ($@)
 		return HMCCU_FormatDeviceInfo ($result);
 	}
 	elsif ($opt eq 'config') {
-		my $channel = undef;
 		my $ccuobj = $ccuaddr;
 		my $par = shift @$a;
 		if (defined ($par)) {
@@ -751,13 +790,13 @@ sub HMCCUDEV_Get ($@)
 		}
 		$par = '.*' if (!defined ($par));
 
-		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "getParamset", $par);
+		my ($rc, $res) = HMCCU_RPCRequest ($hash, "getParamset", $ccuobj, "MASTER", undef, $par);
+#		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "getParamset", $par);
 		return HMCCU_SetError ($hash, $rc, $res) if ($rc < 0);		
 		HMCCU_SetState ($hash, "OK") if (exists ($hash->{STATE}) && $hash->{STATE} eq "Error");
 		return $ccureadings ? undef : $res;
 	}
 	elsif ($opt eq 'configlist') {
-		my $channel = undef;
 		my $ccuobj = $ccuaddr;
 		my $par = shift @$a;
 		if (defined ($par)) {
@@ -769,13 +808,13 @@ sub HMCCUDEV_Get ($@)
 		}
 		$par = '.*' if (!defined ($par));
 
-		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "listParamset", $par);
+		my ($rc, $res) = HMCCU_RPCRequest ($hash, "listParamset", $ccuobj, "MASTER", undef, $par);
+#		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "listParamset", $par);
 		return HMCCU_SetError ($hash, $rc, $res) if ($rc < 0);
 		HMCCU_SetState ($hash, "OK") if (exists ($hash->{STATE}) && $hash->{STATE} eq "Error");
 		return $res;
 	}
 	elsif ($opt eq 'configdesc') {
-		my $channel = undef;
 		my $ccuobj = $ccuaddr;
 		my $par = shift @$a;
 		if (defined ($par)) {
@@ -788,7 +827,8 @@ sub HMCCUDEV_Get ($@)
 			}
 		}
 
-		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "getParamsetDescription", undef);
+		my ($rc, $res) = HMCCU_RPCRequest ($hash, "getParamsetDescription", $ccuobj, "MASTER", undef);
+#		my ($rc, $res) = HMCCU_RPCGetConfig ($hash, $ccuobj, "getParamsetDescription", undef);
 		return HMCCU_SetError ($hash, $rc, $res) if ($rc < 0);
 		HMCCU_SetState ($hash, "OK") if (exists ($hash->{STATE}) && $hash->{STATE} eq "Error");
 		return $res;
@@ -902,6 +942,13 @@ sub HMCCUDEV_Get ($@)
       </li><br/>
       <li><b>set &lt;name&gt; pct &lt;value;&gt; [&lt;ontime&gt; [&lt;ramptime&gt;]]</b><br/>
       	<a href="#HMCCUCHNset">see HMCCUCHN</a>
+      </li><br/>
+      <li><b>set &lt;name&gt; rpcparameter { &lt;channel&gt; VALUES | [&lt;channel&gt;] MASTER } &lt;parameter&gt;=&lt;value&gt; [...]</b><br/>
+         Set multiple datapoints or config parameters by using RPC interface instead of Rega.
+         Supports attribute 'ccuscaleval' for datapoints. Method VALUES (setting datapoints)
+         requires a channel number. For method MASTER (setting parameters) a channel number
+         is optional (setting device parameters). Parameter <i>parameter</i> must be a valid
+         datapoint or config parameter name.
       </li><br/>
       <li><b>set &lt;name&gt; &lt;statevalue&gt;</b><br/>
          State datapoint of a CCU device channel is set to 'statevalue'. State channel and state

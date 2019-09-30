@@ -1,4 +1,4 @@
-# $Id: 98_structure.pm 19809 2019-07-09 20:56:14Z rudolfkoenig $
+# $Id: 98_structure.pm 20272 2019-09-29 08:33:23Z rudolfkoenig $
 ##############################################################################
 #
 #     98_structure.pm
@@ -391,8 +391,11 @@ structure_Set($@)
   my %pars;
 
   # see Forum # 28623 for .cachedHelp
-  return $hash->{".cachedHelp"}
-        if(@list > 1 && $list[1] eq "?" && $hash->{".cachedHelp"});
+  if(@list > 1 && $list[1] eq "?") {
+    return $hash->{".cachedHelp"} if($hash->{".cachedHelp"});
+  } elsif(IsDisabled($me)) {
+    return undef;
+  }
 
   my @devList = @{$hash->{".memberList"}};
   if(@list > 1 && $list[$#list] eq "reverse") {
@@ -478,8 +481,12 @@ structure_Set($@)
         $ret .= $sret;
       }
       if($list[1] eq "?") {
-        $sret =~ s/.*one of //;
-        map { $pars{$_} = 1 } split(" ", $sret);
+        if(!defined($sret)) {
+          Log 1, "$me: 'set $d ?' returned undef";
+        } else {
+          $sret =~ s/.*one of //;
+          map { $pars{$_} = 1 } split(" ", $sret);
+        }
       }
     }
   }

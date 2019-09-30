@@ -25,7 +25,7 @@
 #
 # Discussed in FHEM Forum: https://forum.fhem.de/index.php/topic,91847.0.html
 #
-# $Id: 70_ZoneMinder.pm 18788 2019-03-04 17:54:15Z delmar $
+# $Id: 70_ZoneMinder.pm 20186 2019-09-18 02:16:07Z delmar $
 #
 ##############################################################################
 
@@ -96,7 +96,30 @@ sub ZoneMinder_Define {
   DevIo_CloseDev($hash) if (DevIo_IsOpen($hash));
   DevIo_OpenDev($hash, 0, undef);
 
+  my $triggerPortState = $hash->{STATE};
+  ZoneMinder_updateState( $hash, $triggerPortState, 'n/a' );
+
   ZoneMinder_afterInitialized($hash);
+
+  return undef;
+}
+
+sub ZoneMinder_updateState {
+  my ( $hash, $triggerPortState, $apiState ) = @_;
+
+  if ( defined( $triggerPortState  ) ) {
+    $hash->{helper}{ZM_TRIGGER_STATE} = $triggerPortState;
+  } else {
+    $triggerPortState = $hash->{helper}{ZM_TRIGGER_STATE};
+  }
+
+  if ( defined( $apiState ) ) {
+    $hash->{helper}{ZM_API_STATE} = $apiState;
+  } else {
+    $apiState = $hash->{helper}{ZM_API_STATE};
+  }
+
+  readingsSingleUpdate( $hash, 'state', "Trigger-Port: $triggerPortState, API: $apiState", 0 );
 
   return undef;
 }
@@ -188,12 +211,17 @@ sub ZoneMinder_API_Login_Callback {
   $hash->{APILoginStatus} = $param->{code};
   Log3 $name, 3, "ZoneMinder ($name) - login status: $hash->{APILoginStatus}";
 
+  my $apiState = undef;
   if($err ne "") {
     Log3 $name, 0, "error while requesting ".$param->{url}." - $err";
     $hash->{APILoginError} = $err;
+    $apiState = 'error';
+    
   } elsif($data ne "") {
     if ($data =~ m/Invalid username or password/) {
       $hash->{APILoginError} = "Invalid username or password.";
+      $apiState = 'login failed';
+
     } else {
       delete($defs{$name}{APILoginError});
       
@@ -206,9 +234,12 @@ sub ZoneMinder_API_Login_Callback {
         ZoneMinder_SimpleGet($hash, "$zmApiUrl/host/getVersion.json", \&ZoneMinder_API_ReadHostInfo_Callback);
         ZoneMinder_SimpleGet($hash, "$zmApiUrl/configs.json", \&ZoneMinder_API_ReadConfig_Callback);
         ZoneMinder_API_getLoad($hash);
+
+        $apiState = 'opened';
       }
     }
   }
+  ZoneMinder_updateState( $hash, undef, $apiState );
 
   RemoveInternalTimer($hash, "ZoneMinder_API_Login");
   my $interval = AttrVal($name, 'loginInterval', 3600);
@@ -255,12 +286,14 @@ sub ZoneMinder_API_ReadHostInfo_Callback {
     $hash->{ZM_VERSION} = 'error';
     $hash->{ZM_API_VERSION} = 'error';
   } elsif($data ne "") {
-      
+      $data =~ s/\R//g;
+
       my $zmVersion = ZoneMinder_GetConfigValueByKey($hash, $data, 'version');
       if (not $zmVersion) {
         $zmVersion = 'unknown';
       }
       $hash->{ZM_VERSION} = $zmVersion;
+      $hash->{model} = $zmVersion;
 
       my $zmApiVersion = ZoneMinder_GetConfigValueByKey($hash, $data, 'apiversion');
       if (not $zmApiVersion) {
@@ -281,6 +314,8 @@ sub ZoneMinder_API_ReadHostLoad_Callback {
     Log3 $name, 0, "error while requesting ".$param->{url}." - $err";
     readingsSingleUpdate($hash, 'CPU_Load', 'error', 0);
   } elsif($data ne "") {
+    $data =~ s/\R//g;
+
     my $load = ZoneMinder_GetConfigArrayByKey($hash, $data, 'load');
     readingsSingleUpdate($hash, 'CPU_Load', $load, 1);
 
@@ -299,6 +334,8 @@ sub ZoneMinder_API_ReadConfig_Callback {
   if($err ne "") {
     Log3 $name, 0, "error while requesting ".$param->{url}." - $err";
   } elsif($data ne "") {
+      $data =~ s/\R//g;
+
       my $zmPathZms = ZoneMinder_GetConfigValueByName($hash, $data, 'ZM_PATH_ZMS');
       if ($zmPathZms) {
         $zmPathZms =~ s/\\//g;
@@ -317,19 +354,19 @@ sub ZoneMinder_API_ReadConfig_Callback {
 
 sub ZoneMinder_GetConfigValueByKey {
   my ($hash, $config, $key) = @_;
-  my $searchString = '"'.$key.'":"';
+  my $searchString = qr/"$key":\s*"/;
   return ZoneMinder_GetFromJson($hash, $config, $searchString, '"');
 }
 
 sub ZoneMinder_GetConfigArrayByKey {
   my ($hash, $config, $key) = @_;
-  my $searchString = '"'.$key.'":[';
+  my $searchString = qr/"$key":\s*\[/;
   return ZoneMinder_GetFromJson($hash, $config, $searchString, ']');
 }
 
 sub ZoneMinder_GetConfigValueByName {
   my ($hash, $config, $key) = @_;
-  my $searchString = '"Name":"'.$key.'","Value":"';
+  my $searchString = qr/"Name":"$key","Value":"/;
   return ZoneMinder_GetFromJson($hash, $config, $searchString, '"');
 }
 
@@ -337,16 +374,25 @@ sub ZoneMinder_GetFromJson {
   my ($hash, $config, $searchString, $endChar) = @_;
   my $name = $hash->{NAME};
 
-#  Log3 $name, 5, "json: $config";
-  my $searchLength = length($searchString);
-  my $startIdx = index($config, $searchString);
-  Log3 $name, 5, "ZoneMinder ($name) - $searchString found at $startIdx";
-  $startIdx += $searchLength;
-  my $endIdx = index($config, $endChar, $startIdx);
-  my $frame = $endIdx - $startIdx;
-  my $searchResult = substr $config, $startIdx, $frame;
+  my $searchLength;
+  my $prema;
 
-  Log3 $name, 5, "ZoneMinder ($name) - looking for $searchString - length: $searchLength. start: $startIdx. end: $endIdx. result: $searchResult";
+  my $startIdx;
+  if ( my ($match) = $config =~ $searchString ) {
+    $prema = $';
+    my $ma = $&;
+    my $poma = $`;
+    $searchLength = length($ma);
+  } else {
+    Log3 $name, 1, "ZoneMinder ($name) - $searchString NOT found. Please report, this is a problem.";
+    return;
+  }
+
+  Log3 $name, 5, "ZoneMinder ($name) - $searchString found.";
+
+  my $searchResult = substr $prema, 0;
+  my $endIdx = index($searchResult, $endChar);
+  $searchResult = substr $searchResult, 0, $endIdx;
   
   return $searchResult;
 }
@@ -356,6 +402,7 @@ sub ZoneMinder_API_UpdateMonitors_Callback {
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
 
+  $data =~ s/\R//g;
   my @monitors = split(/\{"Monitor"\:\{/, $data);
 
   foreach my $monitorData (@monitors) {
@@ -388,6 +435,7 @@ sub ZoneMinder_API_CreateMonitors_Callback {
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
 
+  $data =~ s/\R//g;
   my @monitors = split(/\{"Monitor"\:\{/, $data);
 
   foreach my $monitorData (@monitors) {
@@ -438,8 +486,11 @@ sub ZoneMinder_Write {
 
     my $zmMonitorId = $arguments->{zmMonitorId};
     my $zmAlarm = $arguments->{zmAlarm};
-    Log3 $name, 4, "ZoneMinder ($name) method: $method, monitorId:$zmMonitorId, Alarm:$zmAlarm";
-    return ZoneMinder_Trigger_ChangeAlarmState($hash, $zmMonitorId, $zmAlarm);
+    my $zmCause = $arguments->{zmCause};
+    my $zmNotes = $arguments->{zmNotes};
+
+    Log3 $name, 4, "ZoneMinder ($name) method: $method, monitorId:$zmMonitorId, Alarm:$zmAlarm , Cause:$zmCause, Notes:$zmNotes";
+    return ZoneMinder_Trigger_ChangeAlarmState($hash, $zmMonitorId, $zmAlarm, $zmCause, $zmNotes);
 
   } elsif ($method eq 'changeMonitorText') {
 
@@ -502,6 +553,8 @@ sub ZoneMinder_API_ChangeMonitorState_Callback {
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
   if ($data) {
+    $data =~ s/\R//g;
+
     my $monitorId = $param->{zmMonitorId};
     my $logDevHash = $modules{ZM_Monitor}{defptr}{$name.'_'.$monitorId};
     my $function = $param->{zmFunction};
@@ -525,6 +578,8 @@ sub ZoneMinder_API_QueryEventDetails_Callback {
   my ($param, $err, $data) = @_;
   my $hash = $param->{hash};
   my $name = $hash->{NAME};
+
+  $data =~ s/\R//g;
 
   my $zmMonitorId = ZoneMinder_GetConfigValueByKey($hash, $data, 'MonitorId');
   my $zmEventId = ZoneMinder_GetConfigValueByKey($hash, $data, 'Id');
@@ -551,17 +606,17 @@ sub ZoneMinder_API_QueryEventDetails_Callback {
 
 
 sub ZoneMinder_Trigger_ChangeAlarmState {
-  my ( $hash, $zmMonitorId, $zmAlarm ) = @_;
+  my ( $hash, $zmMonitorId, $zmAlarm, $zmCause, $zmNotes ) = @_;
   my $name = $hash->{NAME};
 
   my $msg = "$zmMonitorId|";
   if ( 'on' eq $zmAlarm ) {
-    DevIo_SimpleWrite( $hash, $msg.'on|1|fhem', 2 );
+    DevIo_SimpleWrite( $hash, $msg.'on|1|'.$zmCause.'|'.$zmNotes, 2 );
   } elsif ( 'off' eq $zmAlarm ) {
-    DevIo_SimpleWrite( $hash, $msg.'off|1|fhem', 2);
+    DevIo_SimpleWrite( $hash, $msg.'off|1|'.$zmCause.'|'.$zmNotes, 2);
   } elsif ( $zmAlarm =~ /^on\-for\-timer/ ) {
     my $duration = $zmAlarm =~ s/on\-for\-timer\ /on\ /r;
-    DevIo_SimpleWrite( $hash, $msg.$duration.'|1|fhem', 2);
+    DevIo_SimpleWrite( $hash, $msg.$duration.'|1|'.$zmCause.'|'.$zmNotes, 2);
   }
 
   return undef;
@@ -692,16 +747,10 @@ sub ZoneMinder_Ready {
   my ( $hash ) = @_;
   my $name = $hash->{NAME};
 
-  if ( $hash->{STATE} eq "disconnected" ) {
-    return DevIo_OpenDev($hash, 1, undef ); #if success, $err is undef
-  }
+  ZoneMinder_updateState( $hash, 'disappeared', undef );
 
-  # This is relevant for Windows/USB only
-  if(defined($hash->{USBDev})) {
-    my $po = $hash->{USBDev};
-    my ( $BlockingFlags, $InBytes, $OutBytes, $ErrorFlags ) = $po->status;
-    return ( $InBytes > 0 );
-  }
+  return DevIo_OpenDev($hash, 1, undef ); #if success, $err is undef
+
 }
 
 1;

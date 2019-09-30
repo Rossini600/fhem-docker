@@ -1,4 +1,4 @@
-# $Id: 10_EnOcean.pm 19848 2019-07-18 18:13:05Z klaus.schauer $
+# $Id: 10_EnOcean.pm 20251 2019-09-26 12:04:39Z klaus.schauer $
 
 package main;
 use strict;
@@ -402,6 +402,7 @@ my %EnO_eepConfig = (
   "D2.11.07" => {attr => {subType => "roomCtrlPanel.01", comMode => "biDir", webCmd => "setpointTemp"}, GPLOT => "EnO_D2-10-xx:Temp/SPT/Humi,"},
   "D2.11.08" => {attr => {subType => "roomCtrlPanel.01", comMode => "biDir", webCmd => "setpointTemp"}, GPLOT => "EnO_D2-10-xx:Temp/SPT/Humi,"},
   "D2.14.30" => {attr => {subType => "multiFuncSensor.30"}, GPLOT => "EnO_temp4humi4:Temp/Humi,"},
+  "D2.15.00" => {attr => {subType => "multiFuncSensor.00"}},
   "D2.20.00" => {attr => {subType => "fanCtrl.00", webCmd => "fanSpeed"}, GPLOT => "EnO_fanSpeed4humi4:FanSpeed/Humi,"},
   "D2.32.00" => {attr => {subType => "currentClamp.00"}, GPLOT => "EnO_D2-32-xx:Current,"},
   "D2.32.01" => {attr => {subType => "currentClamp.01"}, GPLOT => "EnO_D2-32-xx:Current,"},
@@ -4307,7 +4308,6 @@ sub EnOcean_Set($@)
         } elsif ($cmd eq "up") {
           # up
           if (defined $a[1]) {
-            #if ($a[1] =~ m/^[+-]?\d+$/ && $a[1] >= 0 && $a[1] <= 255) {
             if ($a[1] =~ m/^[+-]?\d*[.]?\d+$/ && $a[1] >= 0 && $a[1] <= 255) {
               $position = $positionStart - $a[1] / $shutTime * 100;
               if ($angleTime) {
@@ -4344,7 +4344,6 @@ sub EnOcean_Set($@)
         } elsif ($cmd eq "down") {
           # down
           if (defined $a[1]) {
-            #if ($a[1] =~ m/^[+-]?\d+$/ && $a[1] >= 0 && $a[1] <= 255) {
             if ($a[1] =~ m/^[+-]?\d*[.]?\d+$/ && $a[1] >= 0 && $a[1] <= 255) {
               $position = $positionStart + $a[1] / $shutTime * 100;
               if ($angleTime) {
@@ -6855,12 +6854,14 @@ sub EnOcean_Set($@)
       return "Unknown argument $cmd, choose one of $cmdList";
 
     } else {
+######
       # subtype does not support set commands
       $updateState = -1;
       if (AttrVal($name, "remoteManagement", "off") eq "manager") {
         return "Unknown argument $cmd, choose one of $cmdList";
       } else {
         return;
+        #return "Unknown argument $cmd, choose one of";
       }
     }
 
@@ -11185,9 +11186,9 @@ sub EnOcean_Parse($$)
 
     } elsif ($st eq "switch.0A") {
       # Push Button - Single Button EEP D2-03-0A
-      if (!exists($hash->{helper}{batteryPrecent}) || $hash->{helper}{batteryPrecent} != $db[1]) {
-        push @event, "3:batteryPrecent:$db[1]";
-        $hash->{helper}{batteryPrecent} = $db[1];
+      if (!exists($hash->{helper}{batteryPercent}) || $hash->{helper}{batteryPercent} != $db[1]) {
+        push @event, "3:batteryPercent:$db[1]";
+        $hash->{helper}{batteryPercent} = $db[1];
       }
       if ($db[0] == 1) {
         push @event, "3:buttonS:on";
@@ -11539,6 +11540,45 @@ sub EnOcean_Parse($$)
         push @event, "3:state:T: $temperature H: $humidity SPT: " . ($db[1] + $setpointShift) . " F: " . $fanSpeed{$fanSpeed};
       }
       CommandDeleteReading(undef, "$name waitingCmds");
+
+    } elsif ($st eq "multiFuncSensor.00") {
+      # people activity counter
+      # (D2-15-00)
+      my @energyStorage = ('ok', 'medium', 'low', 'critical');
+      my @presence = ('present', 'absent', 'not_detectable', 'error');
+      my $alarm = 'off';
+      my $battery = $energyStorage[($db[2] & 0x30) >> 4];
+      if (!exists($hash->{helper}{lastAlarm}) || $hash->{helper}{lastAlarm} ne $alarm || ReadingsVal($name, 'alarm', '') eq 'dead_sensor') {
+        push @event, "3:alarm:" . $alarm;
+      }
+      push @event, "3:presence:" . $presence[($db[2] & 0xC0) >> 6];
+      if (!exists($hash->{helper}{lastBattery}) || $hash->{helper}{lastBattery} ne $battery) {
+        push @event, "3:battery:" . $battery;
+      }
+      my $activity;
+      my $pirCounterCurrentTel = hex(substr($data, 2, 4));
+      my $pirCounter;
+      if (!exists($hash->{helper}{pirCounterLastTel}) || !exists($hash->{helper}{arrivalPreviousTelegram})) {
+        $activity = 0;
+      } else {
+        if ($hash->{helper}{pirCounterLastTel} > $pirCounterCurrentTel) {
+          # roll-over
+          $pirCounter = 0xFFFF - $hash->{helper}{pirCounterLastTel} + $pirCounterCurrentTel;
+        } else {
+           $pirCounter = $pirCounterCurrentTel - $hash->{helper}{pirCounterLastTel};
+        }
+        $activity = $pirCounter / (gettimeofday() - $hash->{helper}{arrivalPreviousTelegram}) / (($db[2] & 0x0F) + 1);
+      }
+      push @event, "3:activity:" . $activity;
+      push @event, "3:state:" . $activity;
+      $hash->{helper}{arrivalPreviousTelegram} = gettimeofday();
+      $hash->{helper}{lastAlarm} = $alarm;
+      $hash->{helper}{lastBattery} = $battery;
+      $hash->{helper}{pirCounterLastTel} = $pirCounterCurrentTel;
+      RemoveInternalTimer($hash->{helper}{timer}{alarm}) if (exists $hash->{helper}{timer}{alarm});
+      @{$hash->{helper}{timer}{alarm}} = ($hash, 'alarm', 'dead_sensor', 1, 5);
+      InternalTimer(gettimeofday() + 4320, 'EnOcean_readingsSingleUpdate', $hash->{helper}{timer}{alarm}, 0);
+#####
 
     } elsif ($st eq "multiFuncSensor.30") {
       # Sensor for Smoke, Air quality, Hygrothermal comfort, Temperature and Humidity
@@ -12076,7 +12116,7 @@ sub EnOcean_Parse($$)
       $hash->{Dev_ACK} = 'signal';
       DoTrigger($name, "SIGNAL: Dev_ACK", 1);
     } elsif ($signalMID == 6) {
-      push @event, "3:batteryPrecent:$db[0]";
+      push @event, "3:batteryPercent:$db[0]";
     } elsif ($signalMID == 7) {
       push @event, "3:hwVersion:" . substr($data, 10, 8);
       push @event, "3:swVersion:" . substr($data, 2, 8);
@@ -12222,7 +12262,7 @@ sub EnOcean_Parse($$)
             $attr{$name}{productID} = EnOcean_convBitToHex($1);
             $data = $2;
           } elsif ($signalType == 3) {
-######
+#####
             # Connected GSI Sensor IDs
             my $gsiIdDataLen =  $teachInDataLen - 16;
             $data =~ m/^(.{8})(.{8})(.{$gsiIdDataLen})(.*)$/;
@@ -17167,9 +17207,11 @@ sub EnOcean_sec_convertToNonsecure($$$) {
     $rlc = $2;
     $mac = $3;
   } elsif ($expect_rlc == 0 && $expect_mac == 1) {
+    $rlc = ReadingsVal($name, ".rlcRcv", $attr{$name}{rlcRcv});
+    $rlc = $attr{$name}{rlcRcv} if (hex($rlc) < hex($attr{$name}{rlcRcv}));
     $mac = $2;
   }
-
+  my $old_rlc = $rlc;
   Log3 $name, 5, "EnOcean $name EnOcean_sec_convertToNonsecure RORG: $rorg DATA_ENC: $data_enc";
   if ($expect_rlc == 1) {
     Log3 $name, 5, "EnOcean $name EnOcean_sec_convertToNonsecure RLC: $rlc";
@@ -17222,6 +17264,10 @@ sub EnOcean_sec_convertToNonsecure($$$) {
     }
   }
   # Couldn't verify or decrypt message in RLC window
+  #####
+  # restore old rlc
+  readingsSingleUpdate($hash, ".rlcRcv", $old_rlc, 0);
+  $attr{$name}{rlcRcv} = $old_rlc;
   return ("Can't verify or decrypt telegram", undef, undef);
 }
 
@@ -20368,7 +20414,7 @@ EnOcean_Delete($$)
      <ul>
          <li>on</li>
          <li>off</li>
-         <li>batteryPrecent: r/% (Sensor Range: r = 1 % ... 100 %)</li>
+         <li>batteryPercent: r/% (Sensor Range: r = 1 % ... 100 %)</li>
          <li>buttonD: on|off</li>
          <li>buttonL: on|off</li>
          <li>buttonS: on|off</li>
@@ -22019,6 +22065,22 @@ EnOcean_Delete($$)
        <li>state: off|smoke-alarm</li>
      </ul><br>
        The attr subType must be multiFuncSensor.30. This is done if the device was
+       created by autocreate.
+     </li>
+     <br><br>
+
+     <li>People Activity Counter (D2-15-00)<br>
+        [EOcean EASYFIT EPAC untested]<br>
+     <ul>
+       <li>0 ... 100/%</li>
+       <li>activity: 0 ... 100/%</li>
+       <li>alarm: off|dead_sensor</li>
+       <li>battery: ok|medium|low|critical</li>
+       <li>present: present|absent|not_detectable|error</li>
+       <li>teach: &lt;result of teach procedure&gt;</li>
+       <li>state: 0 ... 100/%</li>
+     </ul><br>
+       The attr subType must be multiFuncSensor.00. This is done if the device was
        created by autocreate.
      </li>
      <br><br>

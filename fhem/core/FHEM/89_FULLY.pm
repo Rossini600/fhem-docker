@@ -1,8 +1,8 @@
 ##############################################################################
 #
-#  89_FULLY.pm 1.2
+#  89_FULLY.pm 1.35
 #
-#  $Id: 89_FULLY.pm 18587 2019-02-13 17:52:09Z zap $
+#  $Id: 89_FULLY.pm 20232 2019-09-23 17:26:18Z zap $
 #
 #  Control Fully browser on Android tablets from FHEM.
 #  Requires Fully App Plus license!
@@ -37,7 +37,7 @@ sub FULLY_ProcessDeviceInfo ($$);
 sub FULLY_UpdateReadings ($$);
 sub FULLY_Ping ($$);
 
-my $FULLY_VERSION = "1.2";
+my $FULLY_VERSION = "1.35";
 
 # Timeout for Fully requests
 my $FULLY_TIMEOUT = 5;
@@ -410,14 +410,23 @@ sub FULLY_Get ($@)
 			Log3 $name, 2, "FULLY: [$name] Command failed";
 			return "FULLY: Command failed";
 		}
-		elsif ($response =~ /Wrong password/) {
+		elsif ($result =~ /Wrong password/) {
 			Log3 $name, 2, "FULLY: [$name] Wrong password";
 			return "FULLY: Wrong password";
 		}
 
 		$response = '';
-		while ($result =~ /table-cell\">([^<]+)<\/td><td class="table-cell">([^<]+)</g) {
-			$response .= "$1 = $2<br/>\n";
+#		while ($result =~ /table-cell.>([^<]+)<\/td><td class=.table-cell.>([^<]+)</g) {
+		while ($result =~ /table-cell.>([^<]+)<\/td><td class=.table-cell.>(.*?)<\/td>/g) {
+			my ($in, $iv) = ($1, $2);
+			if ($iv =~ /^<a .*?>(.*?)<\/a>/) {
+				$iv = $1;
+			}
+			elsif ($iv =~ /(.*?)</) {
+				$iv = $1;
+			}
+			$iv =~ s/[ ]+$//;
+			$response .= "$in = $iv<br/>\n";
 		}
 		
 		return $response;
@@ -539,7 +548,9 @@ sub FULLY_ExecuteCB ($$$)
 		if ($param->{cmdno} == $param->{cmdcnt}) {
 			# Last request, update readings
 			Log3 $name, 4, "FULLY: [$name] Last command executed. Processing results";
+			Log3 $name, 5, "FULLY: [$name] $data";
 			my $result = FULLY_ProcessDeviceInfo ($name, $data);
+			Log3 $name, 4, "FULLY: [$name] $result";
 			if (!FULLY_UpdateReadings ($hash, $result)) {
 				Log3 $name, 2, "FULLY: [$name] Command failed";
 			}
@@ -656,14 +667,27 @@ sub FULLY_ProcessDeviceInfo ($$)
 	return "$name|0|state=failed" if (!defined ($result) || $result eq '');
 	return "$name|0|state=wrong password" if ($result =~ /Wrong password/);
 	
+	# HTML code format
+	# <td class='table-cell'>Kiosk mode</td><td class='table-cell'>off</td>
+	
 	my $parameters = "$name|1";
-	while ($result =~ /table-cell\">([^<]+)<\/td><td class="table-cell">([^<]+)</g) {
+	while ($result =~ /table-cell.>([^<]+)<\/td><td class=.table-cell.>(.*?)<\/td>/g) {
 		my $rn = lc($1);
 		my $rv = $2;
+		
+		if ($rv =~ /^<a .*?>(.*?)<\/a>/) {
+			$rv = $1;
+		}
+		elsif ($rv =~ /(.*?)</) {
+			$rv = $1;
+		}
+		$rv =~ s/[ ]+$//;
+		
 		$rv =~ s/\s+$//;
 		$rn =~ s/\:/\./g;
 		$rn =~ s/[^A-Za-z\d_\.-]+/_/g;
 		$rn =~ s/[_]+$//;
+		next if ($rn eq 'webview_ua');
 		if ($rn eq 'battery_level') {
 			if ($rv =~ /^([0-9]+)% \(([^\)]+)\)$/) {
 				$parameters .= "|$rn=$1|power=$2";

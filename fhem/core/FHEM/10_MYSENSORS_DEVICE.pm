@@ -21,7 +21,7 @@
 #     You should have received a copy of the GNU General Public License
 #     along with fhem.  If not, see <http://www.gnu.org/licenses/>.
 #
-# $Id: 10_MYSENSORS_DEVICE.pm 19370 2019-05-11 14:49:14Z Beta-User $
+# $Id: 10_MYSENSORS_DEVICE.pm 20280 2019-09-30 05:10:24Z Beta-User $
 #
 ##############################################
 
@@ -415,7 +415,7 @@ sub onStreamMessage($$) {
     last;
     };
     $type == ST_FIRMWARE_REQUEST and do {
-        last if ($msg->{ack});
+        last if ($msg->{ack} or !defined $hash->{FW_DATA});
         if (length($msg->{payload}) == 12) {
           my $version = hex2Short(substr($msg->{payload}, 4, 4));
           my $block = hex2Short(substr($msg->{payload}, 8, 4));

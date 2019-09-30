@@ -10,7 +10,7 @@
 use strict;
 use warnings;
 
-# $Id: commandref_join.pl 19539 2019-06-03 20:25:25Z rudolfkoenig $
+# $Id: commandref_join.pl 19942 2019-08-03 11:20:28Z rudolfkoenig $
 
 my $noWarnings = grep $_ eq '-noWarnings', @ARGV;
 my ($verify) = grep $_ =~ /\.pm$/ , @ARGV;
@@ -204,7 +204,8 @@ generateModuleCommandref($$;$$)
         if($dosMode);
 # TODO: add doc to each $jsfile
     print "*** $lang $fPath: No document text found\n"
-       if(!$jsFile && !$suffix && !$docCount && !$dosMode && $fPath !~ m,/99_,);
+       if(!$jsFile && !$suffix && !$docCount && !$dosMode &&
+          $fPath !~ m,/99_, && !$noWarnings);
     if(!$jsFile && $suffix && !$docCount && !$dosMode) {
       if($lang eq "DE" && $fh) {
         print $fh <<EOF;
@@ -227,5 +228,5 @@ EOF
     }
 
     print "*** $lang $fPath: =end html$suffix: ".($nrEnd>0 ? "missing":"there are too many")."\n"
-        if($nrEnd);
+        if($nrEnd && !$noWarnings);
 }
